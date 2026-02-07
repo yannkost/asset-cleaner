@@ -46,6 +46,11 @@ class Plugin extends BasePlugin
     public bool $hasCpSection = false;
 
     /**
+     * @var string|null
+     */
+    public ?string $icon = null;
+
+    /**
      * @inheritdoc
      */
     public static function config(): array
@@ -63,6 +68,9 @@ class Plugin extends BasePlugin
     public function init(): void
     {
         parent::init();
+        
+        // Set plugin icon
+        $this->icon = $this->getBasePath() . '/icon.svg';
 
         // Register console commands
         if (Craft::$app instanceof ConsoleApplication) {

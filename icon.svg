@@ -1,0 +1,29 @@
+<svg version="1.2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200" width="1200" height="1200">
+	<defs>
+		<linearGradient id="g1" x2="1" gradientUnits="userSpaceOnUse" gradientTransform="matrix(0,1200,-1200,0,0,0)">
+			<stop offset="0" stop-color="#1652d8"/>
+			<stop offset="1" stop-color="#38b8f7"/>
+		</linearGradient>
+	</defs>
+	<style>
+		.s0 { fill: url(#g1) } 
+		.s1 { fill: #ffffff } 
+	</style>
+	<!-- Blue gradient rounded square background -->
+	<path fill-rule="evenodd" class="s0" d="m270 0h660c149.12 0 270 120.88 270 270v660c0 149.12-120.88 270-270 270h-660c-149.12 0-270-120.88-270-270v-660c0-149.12 120.88-270 270-270z"/>
+	<!-- Dust flakes / sparkles - bottom left near broom head, flying up -->
+	<g class="s1" opacity="0.9">
+		<circle cx="280" cy="470" r="18"/>
+		<circle cx="200" cy="420" r="12"/>
+		<circle cx="350" cy="530" r="10"/>
+		<circle cx="320" cy="400" r="14"/>
+		<circle cx="180" cy="500" r="8"/>
+		<circle cx="250" cy="330" r="10"/>
+		<circle cx="400" cy="450" r="6"/>
+		<circle cx="150" cy="400" r="12"/>
+	</g>
+	<!-- Broom icon from utilities - scaled and centered -->
+	<g class="s1" transform="translate(260, 300) scale(1.18)">
+		<path d="M566.6 54.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-192 192-34.7-34.7c-4.2-4.2-10-6.6-16-6.6c-12.5 0-22.6 10.1-22.6 22.6l0 29.1L364.3 320l29.1 0c12.5 0 22.6-10.1 22.6-22.6c0-6-2.4-11.8-6.6-16l-34.7-34.7 192-192zM341.1 353.4L222.6 234.9c-42.7-3.7-85.2 11.7-115.8 42.3l-8 8C76.5 307.5 64 337.7 64 369.2c0 6.8 7.1 11.2 13.2 8.2l51.1-25.5c5-2.5 9.5 4.1 5.4 7.9L7.3 473.4C2.7 477.6 0 483.6 0 489.9C0 502.1 9.9 512 22.1 512l173.3 0c38.8 0 75.9-15.4 103.4-42.8c30.6-30.6 45.9-73.1 42.3-115.8z"/>
+	</g>
+</svg>

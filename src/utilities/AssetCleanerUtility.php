@@ -35,7 +35,7 @@ class AssetCleanerUtility extends Utility
      */
     public static function icon(): ?string
     {
-        return 'broom';
+        return Craft::getAlias('@yann/assetcleaner/icon.svg');
     }
 
     /**
