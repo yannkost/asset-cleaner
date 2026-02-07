@@ -1,0 +1,39 @@
+<div class="asset-cleaner-usage-popover">
+    {% if not isUsed %}
+        <p class="not-used">{{ 'This asset is not used anywhere.'|t('asset-cleaner') }}</p>
+    {% else %}
+        {% if usage.relations|length > 0 %}
+            <div class="usage-section">
+                <h4>{{ 'Used by Entries'|t('asset-cleaner') }}</h4>
+                <ul class="usage-list">
+                    {% for entry in usage.relations %}
+                        <li>
+                            <a href="{{ entry.url }}" target="_blank">
+                                <span class="status {{ entry.status }}"></span>
+                                {{ entry.title }}
+                                <span class="section-name">({{ entry.section }})</span>
+                            </a>
+                        </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        {% endif %}
+
+        {% if usage.content|length > 0 %}
+            <div class="usage-section">
+                <h4>{{ 'Used in Content Fields'|t('asset-cleaner') }}</h4>
+                <ul class="usage-list">
+                    {% for entry in usage.content %}
+                        <li>
+                            <a href="{{ entry.url }}" target="_blank">
+                                <span class="status {{ entry.status }}"></span>
+                                {{ entry.title }}
+                                <span class="field-name">({{ entry.field }})</span>
+                            </a>
+                        </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        {% endif %}
+    {% endif %}
+</div>

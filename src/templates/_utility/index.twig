@@ -1,0 +1,77 @@
+{% import '_includes/forms.twig' as forms %}
+
+<div class="asset-cleaner-utility">
+    <div class="asset-cleaner-form">
+        <h2>{{ 'Select Volumes'|t('asset-cleaner') }}</h2>
+        
+        <div class="volume-checkboxes">
+            {% for volume in volumes %}
+                <div class="checkbox-wrapper">
+                    {{ forms.checkbox({
+                        label: volume.name,
+                        name: 'volumeIds[]',
+                        value: volume.id,
+                        checked: true,
+                        class: 'volume-checkbox'
+                    }) }}
+                </div>
+            {% endfor %}
+        </div>
+
+        <div class="buttons">
+            <button type="button" class="btn submit asset-cleaner-scan-btn">
+                {{ 'Scan Now'|t('asset-cleaner') }}
+            </button>
+        </div>
+    </div>
+
+    <div class="asset-cleaner-loading" style="display: none;">
+        <div class="spinner"></div>
+        <span class="loading-text">{{ 'Scanning...'|t('asset-cleaner') }}</span>
+        <div class="progress-bar-container" style="display: none;">
+            <div class="progress-bar">
+                <div class="progress-bar-fill"></div>
+            </div>
+            <div class="progress-text">0%</div>
+        </div>
+    </div>
+
+    <div class="asset-cleaner-results" style="display: none;">
+        <h2>{{ 'Results'|t('asset-cleaner') }}</h2>
+        
+        <div class="asset-cleaner-stats">
+            <div class="stat-box used">
+                <span class="stat-label">{{ 'Used Assets'|t('asset-cleaner') }}</span>
+                <span class="stat-value used-count">0</span>
+            </div>
+            <div class="stat-box unused">
+                <span class="stat-label">{{ 'Unused Assets'|t('asset-cleaner') }}</span>
+                <span class="stat-value unused-count">0</span>
+            </div>
+        </div>
+
+        <div class="asset-cleaner-actions" style="display: none;">
+            <h3>{{ 'Bulk Actions - All Selected Volumes'|t('asset-cleaner') }}</h3>
+            
+            <div class="buttons">
+                <button type="button" class="btn asset-cleaner-csv-btn">
+                    {{ 'Download CSV'|t('asset-cleaner') }}
+                </button>
+                <button type="button" class="btn asset-cleaner-zip-btn">
+                    {{ 'Download ZIP'|t('asset-cleaner') }}
+                </button>
+                <button type="button" class="btn asset-cleaner-trash-btn">
+                    {{ 'Put into Trash'|t('asset-cleaner') }}
+                </button>
+                <button type="button" class="btn submit asset-cleaner-delete-btn">
+                    {{ 'Delete Permanently'|t('asset-cleaner') }}
+                </button>
+            </div>
+        </div>
+
+        <hr class="asset-cleaner-separator" style="display: none;">
+
+        <div class="asset-cleaner-volumes-container">
+        </div>
+    </div>
+</div>

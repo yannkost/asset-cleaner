@@ -6,8 +6,13 @@ Identify and clean up unused assets in Craft CMS 5.
 
 - **View Usage Button** - See where any asset is used directly from the asset edit page
 - **Utilities Page** - Scan volumes for unused assets with bulk actions
-- **Export Options** - Download CSV or ZIP of unused assets
-- **Bulk Delete** - Delete unused assets with a single click
+- **Per-Volume Results** - Results grouped by volume with individual file counts and total sizes
+- **Export Options** - Download CSV or ZIP of unused assets with smart filenames
+- **Folder Structure Option** - Choose to preserve folder structure or flatten files in ZIP downloads
+- **Soft Delete (Trash)** - Move assets to trash for safe removal with recovery option
+- **Permanent Delete** - Permanently delete assets with double confirmation
+- **Progress Indicator** - Visual progress bar during scanning
+- **Memory-Efficient** - Handles large files (10GB+) without memory issues
 - **CLI Commands** - Scan, export, and delete from the command line
 
 ## Requirements
@@ -54,10 +59,26 @@ php craft plugin/install asset-cleaner
 1. Navigate to **Utilities → Asset Cleaner**
 2. Select the volumes you want to scan
 3. Click **Scan Now**
-4. Review the results and use bulk actions:
+4. Review the results grouped by volume, showing:
+   - Number of unused assets per volume
+   - Total file size per volume
+5. Use bulk actions (global or per-volume):
    - **Download CSV** - Export list of unused assets
-   - **Download ZIP** - Download all unused assets as a ZIP file
-   - **Delete** - Permanently delete selected assets
+   - **Download ZIP** - Download unused assets (with folder structure option)
+   - **Put into Trash** - Soft delete assets (recoverable)
+   - **Delete Permanently** - Permanently remove assets (with double confirmation)
+
+### ZIP Download Options
+
+When downloading a ZIP file, you can choose:
+- **Flat** - All files in the ZIP root
+- **Preserve folder structure** - Files organized by `volume-handle/folder/path/filename`
+
+### Smart Filenames
+
+Exported files include meaningful names with timestamps:
+- CSV: `unused-assets_volume-name_2024-01-15_14-30-00.csv`
+- ZIP: `unused-assets_volume1__volume2_2024-01-15_14-30-00.zip`
 
 ### View Usage Button
 
@@ -92,20 +113,38 @@ php craft asset-cleaner/scan/delete --dry-run
 
 ## How It Works
 
-The plugin identifies unused assets by checking:
+The plugin identifies unused assets by performing comprehensive checks across your Craft CMS site:
 
-1. **Relations Table** - Asset field references stored in Craft's relations table
-2. **Content Fields** - Redactor and CKEditor HTML content for embedded asset URLs
+1. **Relations Table** - Asset field references in entries, globals, categories, and other elements stored in Craft's relations table
+2. **Content Fields** - Scans Redactor, CKEditor, and PlainText fields for embedded asset URLs, filenames, and paths
+3. **Global Sets** - Checks global set content fields for asset references
+4. **Nested Entries** - Resolves Matrix blocks and other nested entries to their parent entries for accurate reporting
+
+The plugin uses multiple search patterns to ensure accurate detection:
+- Asset filenames
+- Full asset URLs
+- Relative URL paths
+- Folder paths + filenames
+- `data-asset-id` attributes in HTML content
 
 No database migrations are required. All queries are performed directly against Craft's existing tables.
 
-## Permissions
+## Technical Details
+
+### Memory-Efficient ZIP Creation
+
+The plugin uses streaming to handle large files without exhausting PHP memory:
+- Files are processed in 8KB chunks
+- Temporary files are used instead of loading entire files into memory
+- Supports files of any size, limited only by disk space
+
+### Permissions
 
 The Asset Cleaner utility requires the `utility:asset-cleaner` permission. Assign this permission to user groups that should have access to the utility.
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+The Craft License. See [LICENSE.md](LICENSE.md) for details.
 
 ## Support
 
@@ -116,3 +155,12 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 ### 1.0.0
 - Initial release
+- View Usage button on asset edit pages
+- Utility page with volume scanning
+- Per-volume result grouping with file counts and total sizes
+- CSV and ZIP export with smart filenames
+- ZIP folder structure option (flat or preserve)
+- Soft delete (trash) and permanent delete with confirmations
+- Progress bar during scanning
+- Memory-efficient ZIP creation for large files
+- CLI commands for scanning, exporting, and deleting
