@@ -6,6 +6,7 @@ namespace yann\assetcleaner\controllers;
 
 use Craft;
 use craft\web\Controller;
+use yann\assetcleaner\helpers\Logger;
 use yann\assetcleaner\Plugin;
 use yii\web\Response;
 
@@ -44,18 +45,26 @@ class UsageController extends Controller
     {
         $this->requireAcceptsJson();
 
-        $request = Craft::$app->getRequest();
-        $assetId = $request->getRequiredParam('assetId');
+        try {
+            $request = Craft::$app->getRequest();
+            $assetId = $request->getRequiredParam('assetId');
 
-        $service = Plugin::getInstance()->assetUsage;
-        $usage = $service->getAssetUsage((int)$assetId);
+            $service = Plugin::getInstance()->assetUsage;
+            $usage = $service->getAssetUsage((int)$assetId);
 
-        $isUsed = !empty($usage['relations']) || !empty($usage['content']);
+            $isUsed = !empty($usage['relations']) || !empty($usage['content']);
 
-        return $this->asJson([
-            'success' => true,
-            'isUsed' => $isUsed,
-            'usage' => $usage,
-        ]);
+            return $this->asJson([
+                'success' => true,
+                'isUsed' => $isUsed,
+                'usage' => $usage,
+            ]);
+        } catch (\Throwable $e) {
+            Logger::exception('Failed to get asset usage', $e);
+            return $this->asJson([
+                'success' => false,
+                'error' => Craft::t('asset-cleaner', 'Failed to get asset usage.'),
+            ]);
+        }
     }
 }

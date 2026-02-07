@@ -8,6 +8,7 @@ use Craft;
 use craft\elements\Asset;
 use craft\helpers\FileHelper;
 use craft\web\Controller;
+use yann\assetcleaner\helpers\Logger;
 use yann\assetcleaner\Plugin;
 use yii\web\Response;
 use ZipArchive;
@@ -48,27 +49,35 @@ class AssetCleanerController extends Controller
     {
         $this->requireAcceptsJson();
 
-        $request = Craft::$app->getRequest();
-        $volumeIds = $request->getBodyParam('volumeIds', []);
+        try {
+            $request = Craft::$app->getRequest();
+            $volumeIds = $request->getBodyParam('volumeIds', []);
 
-        if (!is_array($volumeIds)) {
-            $volumeIds = [];
+            if (!is_array($volumeIds)) {
+                $volumeIds = [];
+            }
+
+            $volumeIds = array_map('intval', $volumeIds);
+
+            $service = Plugin::getInstance()->assetUsage;
+
+            $unusedCount = $service->countUnusedAssets($volumeIds);
+            $usedCount = $service->countUsedAssets($volumeIds);
+            $unusedAssets = $service->getUnusedAssets($volumeIds);
+
+            return $this->asJson([
+                'success' => true,
+                'usedCount' => $usedCount,
+                'unusedCount' => $unusedCount,
+                'unusedAssets' => $unusedAssets,
+            ]);
+        } catch (\Throwable $e) {
+            Logger::exception('Failed to scan volumes', $e);
+            return $this->asJson([
+                'success' => false,
+                'error' => Craft::t('asset-cleaner', 'Failed to scan volumes.'),
+            ]);
         }
-
-        $volumeIds = array_map('intval', $volumeIds);
-
-        $service = Plugin::getInstance()->assetUsage;
-
-        $unusedCount = $service->countUnusedAssets($volumeIds);
-        $usedCount = $service->countUsedAssets($volumeIds);
-        $unusedAssets = $service->getUnusedAssets($volumeIds);
-
-        return $this->asJson([
-            'success' => true,
-            'usedCount' => $usedCount,
-            'unusedCount' => $unusedCount,
-            'unusedAssets' => $unusedAssets,
-        ]);
     }
 
     /**
@@ -78,66 +87,74 @@ class AssetCleanerController extends Controller
      */
     public function actionExport(): Response
     {
-        $request = Craft::$app->getRequest();
-        $volumeIds = $request->getBodyParam('volumeIds', []);
+        try {
+            $request = Craft::$app->getRequest();
+            $volumeIds = $request->getBodyParam('volumeIds', []);
 
-        if (!is_array($volumeIds)) {
-            $volumeIds = [];
-        }
+            if (!is_array($volumeIds)) {
+                $volumeIds = [];
+            }
 
-        $volumeIds = array_map('intval', $volumeIds);
+            $volumeIds = array_map('intval', $volumeIds);
 
-        $service = Plugin::getInstance()->assetUsage;
-        $unusedAssets = $service->getUnusedAssets($volumeIds);
+            $service = Plugin::getInstance()->assetUsage;
+            $unusedAssets = $service->getUnusedAssets($volumeIds);
 
-        $csv = "ID,Title,Filename,Volume,Size,Path,URL\n";
+            $csv = "ID,Title,Filename,Volume,Size,Path,URL\n";
 
-        foreach ($unusedAssets as $asset) {
-            $csv .= sprintf(
-                "%d,%s,%s,%s,%d,%s,%s\n",
-                $asset['id'],
-                '"' . str_replace('"', '""', $asset['title']) . '"',
-                '"' . str_replace('"', '""', $asset['filename']) . '"',
-                '"' . str_replace('"', '""', $asset['volume']) . '"',
-                $asset['size'],
-                '"' . str_replace('"', '""', $asset['path'] ?? '') . '"',
-                '"' . str_replace('"', '""', $asset['url'] ?? '') . '"'
-            );
-        }
+            foreach ($unusedAssets as $asset) {
+                $csv .= sprintf(
+                    "%d,%s,%s,%s,%d,%s,%s\n",
+                    $asset['id'],
+                    '"' . str_replace('"', '""', $asset['title']) . '"',
+                    '"' . str_replace('"', '""', $asset['filename']) . '"',
+                    '"' . str_replace('"', '""', $asset['volume']) . '"',
+                    $asset['size'],
+                    '"' . str_replace('"', '""', $asset['path'] ?? '') . '"',
+                    '"' . str_replace('"', '""', $asset['url'] ?? '') . '"'
+                );
+            }
 
-        // Build filename with volume names and timestamp
-        $filename = 'unused-assets';
-        
-        // Add volume names if specific volumes were selected
-        if (!empty($volumeIds)) {
-            $volumes = \craft\elements\Asset::find()
-                ->volumeId($volumeIds)
-                ->limit(1)
-                ->all();
+            // Build filename with volume names and timestamp
+            $filename = 'unused-assets';
             
-            $volumeNames = [];
-            foreach ($volumeIds as $volumeId) {
-                $volume = Craft::$app->getVolumes()->getVolumeById($volumeId);
-                if ($volume) {
-                    $volumeNames[] = $this->sanitizeFilename($volume->handle);
+            // Add volume names if specific volumes were selected
+            if (!empty($volumeIds)) {
+                $volumes = \craft\elements\Asset::find()
+                    ->volumeId($volumeIds)
+                    ->limit(1)
+                    ->all();
+                
+                $volumeNames = [];
+                foreach ($volumeIds as $volumeId) {
+                    $volume = Craft::$app->getVolumes()->getVolumeById($volumeId);
+                    if ($volume) {
+                        $volumeNames[] = $this->sanitizeFilename($volume->handle);
+                    }
+                }
+                
+                if (!empty($volumeNames)) {
+                    $filename .= '_' . implode('__', $volumeNames);
                 }
             }
             
-            if (!empty($volumeNames)) {
-                $filename .= '_' . implode('__', $volumeNames);
-            }
+            // Add human-readable timestamp
+            $filename .= '_' . date('Y-m-d_H-i-s') . '.csv';
+
+            $response = Craft::$app->getResponse();
+            $response->format = Response::FORMAT_RAW;
+            $response->headers->set('Content-Type', 'text/csv');
+            $response->headers->set('Content-Disposition', 'attachment; filename="' . $filename . '"');
+            $response->data = $csv;
+
+            return $response;
+        } catch (\Throwable $e) {
+            Logger::exception('Failed to export CSV', $e);
+            return $this->asJson([
+                'success' => false,
+                'error' => Craft::t('asset-cleaner', 'Failed to export CSV.'),
+            ]);
         }
-        
-        // Add human-readable timestamp
-        $filename .= '_' . date('Y-m-d_H-i-s') . '.csv';
-
-        $response = Craft::$app->getResponse();
-        $response->format = Response::FORMAT_RAW;
-        $response->headers->set('Content-Type', 'text/csv');
-        $response->headers->set('Content-Disposition', 'attachment; filename="' . $filename . '"');
-        $response->data = $csv;
-
-        return $response;
     }
 
     /**
@@ -259,7 +276,7 @@ class AssetCleanerController extends Controller
                 }
             } catch (\Throwable $e) {
                 // Log error but continue with other assets
-                Craft::warning('Failed to add asset to ZIP: ' . $asset->filename . ' - ' . $e->getMessage(), 'asset-cleaner');
+                Logger::warning('Failed to add asset to ZIP: ' . $asset->filename, ['error' => $e->getMessage()]);
             }
         }
 
@@ -286,43 +303,53 @@ class AssetCleanerController extends Controller
         $this->requireAcceptsJson();
         $this->requirePostRequest();
 
-        $request = Craft::$app->getRequest();
-        $assetIds = $request->getBodyParam('assetIds', []);
+        try {
+            $request = Craft::$app->getRequest();
+            $assetIds = $request->getBodyParam('assetIds', []);
 
-        if (!is_array($assetIds) || empty($assetIds)) {
+            if (!is_array($assetIds) || empty($assetIds)) {
+                return $this->asJson([
+                    'success' => false,
+                    'error' => Craft::t('asset-cleaner', 'No assets selected.'),
+                ]);
+            }
+
+            $assetIds = array_map('intval', $assetIds);
+
+            $assets = Asset::find()
+                ->id($assetIds)
+                ->status(null)
+                ->all();
+
+            $trashedCount = 0;
+            $errors = [];
+
+            foreach ($assets as $asset) {
+                try {
+                    if (Craft::$app->getElements()->deleteElement($asset, false)) {
+                        $trashedCount++;
+                    } else {
+                        $errors[] = $asset->filename;
+                        Logger::warning('Failed to trash asset', ['filename' => $asset->filename]);
+                    }
+                } catch (\Throwable $e) {
+                    $errors[] = $asset->filename . ': ' . $e->getMessage();
+                    Logger::exception('Error trashing asset: ' . $asset->filename, $e);
+                }
+            }
+
+            return $this->asJson([
+                'success' => empty($errors),
+                'trashedCount' => $trashedCount,
+                'errors' => $errors,
+            ]);
+        } catch (\Throwable $e) {
+            Logger::exception('Failed to move assets to trash', $e);
             return $this->asJson([
                 'success' => false,
-                'error' => Craft::t('asset-cleaner', 'No assets selected.'),
+                'error' => Craft::t('asset-cleaner', 'Failed to move assets to trash.'),
             ]);
         }
-
-        $assetIds = array_map('intval', $assetIds);
-
-        $assets = Asset::find()
-            ->id($assetIds)
-            ->status(null)
-            ->all();
-
-        $trashedCount = 0;
-        $errors = [];
-
-        foreach ($assets as $asset) {
-            try {
-                if (Craft::$app->getElements()->deleteElement($asset, false)) {
-                    $trashedCount++;
-                } else {
-                    $errors[] = $asset->filename;
-                }
-            } catch (\Throwable $e) {
-                $errors[] = $asset->filename . ': ' . $e->getMessage();
-            }
-        }
-
-        return $this->asJson([
-            'success' => empty($errors),
-            'trashedCount' => $trashedCount,
-            'errors' => $errors,
-        ]);
     }
 
     /**
@@ -335,43 +362,53 @@ class AssetCleanerController extends Controller
         $this->requireAcceptsJson();
         $this->requirePostRequest();
 
-        $request = Craft::$app->getRequest();
-        $assetIds = $request->getBodyParam('assetIds', []);
+        try {
+            $request = Craft::$app->getRequest();
+            $assetIds = $request->getBodyParam('assetIds', []);
 
-        if (!is_array($assetIds) || empty($assetIds)) {
+            if (!is_array($assetIds) || empty($assetIds)) {
+                return $this->asJson([
+                    'success' => false,
+                    'error' => Craft::t('asset-cleaner', 'No assets selected.'),
+                ]);
+            }
+
+            $assetIds = array_map('intval', $assetIds);
+
+            $assets = Asset::find()
+                ->id($assetIds)
+                ->status(null)
+                ->all();
+
+            $deletedCount = 0;
+            $errors = [];
+
+            foreach ($assets as $asset) {
+                try {
+                    if (Craft::$app->getElements()->deleteElement($asset, true)) {
+                        $deletedCount++;
+                    } else {
+                        $errors[] = $asset->filename;
+                        Logger::warning('Failed to delete asset', ['filename' => $asset->filename]);
+                    }
+                } catch (\Throwable $e) {
+                    $errors[] = $asset->filename . ': ' . $e->getMessage();
+                    Logger::exception('Error deleting asset: ' . $asset->filename, $e);
+                }
+            }
+
+            return $this->asJson([
+                'success' => empty($errors),
+                'deletedCount' => $deletedCount,
+                'errors' => $errors,
+            ]);
+        } catch (\Throwable $e) {
+            Logger::exception('Failed to delete assets', $e);
             return $this->asJson([
                 'success' => false,
-                'error' => Craft::t('asset-cleaner', 'No assets selected.'),
+                'error' => Craft::t('asset-cleaner', 'Failed to delete assets.'),
             ]);
         }
-
-        $assetIds = array_map('intval', $assetIds);
-
-        $assets = Asset::find()
-            ->id($assetIds)
-            ->status(null)
-            ->all();
-
-        $deletedCount = 0;
-        $errors = [];
-
-        foreach ($assets as $asset) {
-            try {
-                if (Craft::$app->getElements()->deleteElement($asset, true)) {
-                    $deletedCount++;
-                } else {
-                    $errors[] = $asset->filename;
-                }
-            } catch (\Throwable $e) {
-                $errors[] = $asset->filename . ': ' . $e->getMessage();
-            }
-        }
-
-        return $this->asJson([
-            'success' => empty($errors),
-            'deletedCount' => $deletedCount,
-            'errors' => $errors,
-        ]);
     }
 
     /**
@@ -383,43 +420,51 @@ class AssetCleanerController extends Controller
     {
         $this->requireAcceptsJson();
 
-        $request = Craft::$app->getRequest();
-        $assetIds = $request->getBodyParam('assetIds', []);
+        try {
+            $request = Craft::$app->getRequest();
+            $assetIds = $request->getBodyParam('assetIds', []);
 
-        if (!is_array($assetIds) || empty($assetIds)) {
+            if (!is_array($assetIds) || empty($assetIds)) {
+                return $this->asJson([
+                    'success' => false,
+                    'error' => Craft::t('asset-cleaner', 'No assets selected.'),
+                ]);
+            }
+
+            $assetIds = array_map('intval', $assetIds);
+
+            $assets = Asset::find()
+                ->id($assetIds)
+                ->status(null)
+                ->all();
+
+            $preview = [];
+            $totalSize = 0;
+
+            foreach ($assets as $asset) {
+                $preview[] = [
+                    'id' => $asset->id,
+                    'title' => $asset->title,
+                    'filename' => $asset->filename,
+                    'volume' => $asset->volume->name ?? '',
+                    'size' => $asset->size,
+                ];
+                $totalSize += $asset->size;
+            }
+
+            return $this->asJson([
+                'success' => true,
+                'assets' => $preview,
+                'count' => count($preview),
+                'totalSize' => $totalSize,
+            ]);
+        } catch (\Throwable $e) {
+            Logger::exception('Failed to preview delete', $e);
             return $this->asJson([
                 'success' => false,
-                'error' => Craft::t('asset-cleaner', 'No assets selected.'),
+                'error' => Craft::t('asset-cleaner', 'An error occurred.'),
             ]);
         }
-
-        $assetIds = array_map('intval', $assetIds);
-
-        $assets = Asset::find()
-            ->id($assetIds)
-            ->status(null)
-            ->all();
-
-        $preview = [];
-        $totalSize = 0;
-
-        foreach ($assets as $asset) {
-            $preview[] = [
-                'id' => $asset->id,
-                'title' => $asset->title,
-                'filename' => $asset->filename,
-                'volume' => $asset->volume->name ?? '',
-                'size' => $asset->size,
-            ];
-            $totalSize += $asset->size;
-        }
-
-        return $this->asJson([
-            'success' => true,
-            'assets' => $preview,
-            'count' => count($preview),
-            'totalSize' => $totalSize,
-        ]);
     }
 
     /**
