@@ -25,7 +25,7 @@ Identify and clean up unused assets in Craft CMS 5.
 ### Via Composer (recommended)
 
 ```bash
-composer require yannkost/craft-asset-cleaner
+composer require yann/asset-cleaner
 php craft plugin/install asset-cleaner
 ```
 
@@ -48,7 +48,7 @@ php craft plugin/install asset-cleaner
 3. Run:
 
 ```bash
-composer require yannkost/craft-asset-cleaner
+composer require yann/asset-cleaner
 php craft plugin/install asset-cleaner
 ```
 
@@ -148,8 +148,8 @@ The Craft License. See [LICENSE.md](LICENSE.md) for details.
 
 ## Support
 
-- [GitHub Issues](https://github.com/yannkost/craft-asset-cleaner/issues)
-- [Documentation](https://github.com/yannkost/craft-asset-cleaner)
+- [GitHub Issues](https://github.com/yannkost/asset-cleaner/issues)
+- [Documentation](https://github.com/yannkost/asset-cleaner)
 
 ## Changelog
 
