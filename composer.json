@@ -21,8 +21,8 @@
         }
     ],
     "support": {
-        "issues": "https://github.com/yannkost/craft-asset-cleaner/issues",
-        "source": "https://github.com/yannkost/craft-asset-cleaner"
+        "issues": "https://github.com/yannkost/asset-cleaner/issues",
+        "source": "https://github.com/yannkost/asset-cleaner"
     },
     "require": {
         "php": ">=8.2",
@@ -39,8 +39,8 @@
         "class": "yann\\assetcleaner\\Plugin",
         "developer": "Yann Kost",
         "developerUrl": "https://github.com/yannkost",
-        "documentationUrl": "https://github.com/yannkost/craft-asset-cleaner/blob/main/README.md",
-        "changelogUrl": "https://raw.githubusercontent.com/yannkost/craft-asset-cleaner/main/CHANGELOG.md",
+        "documentationUrl": "https://github.com/yannkost/asset-cleaner/blob/main/README.md",
+        "changelogUrl": "https://raw.githubusercontent.com/yannkost/asset-cleaner/main/CHANGELOG.md",
         "icon": "icon.svg"
     }
 }
