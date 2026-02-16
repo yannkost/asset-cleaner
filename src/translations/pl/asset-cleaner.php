@@ -73,4 +73,10 @@ return [
     'Failed to move assets to trash.' => 'Nie udało się przenieść zasobów do kosza.',
     'Failed to delete assets.' => 'Nie udało się usunąć zasobów.',
     'Failed to get asset usage.' => 'Nie udało się pobrać informacji o użyciu zasobu.',
+
+    // Queue Scan
+    'Scan queued...' => 'Skanowanie w kolejce...',
+    'Scan failed.' => 'Skanowanie nie powiodło się.',
+    'Scanning assets for usage' => 'Skanowanie użycia zasobów',
+    'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => 'Kolejka nie wydaje się być uruchomiona. Upewnij się, że worker kolejki jest aktywny (np. php craft queue/listen).',
 ];

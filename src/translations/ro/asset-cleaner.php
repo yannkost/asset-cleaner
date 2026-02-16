@@ -73,4 +73,10 @@ return [
     'Failed to move assets to trash.' => 'Mutarea resurselor în coș a eșuat.',
     'Failed to delete assets.' => 'Ștergerea resurselor a eșuat.',
     'Failed to get asset usage.' => 'Obținerea utilizării resursei a eșuat.',
+
+    // Queue Scan
+    'Scan queued...' => 'Scanare în așteptare...',
+    'Scan failed.' => 'Scanarea a eșuat.',
+    'Scanning assets for usage' => 'Scanarea utilizării resurselor',
+    'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => 'Coada nu pare să ruleze. Asigurați-vă că un worker de coadă este activ (ex: php craft queue/listen).',
 ];

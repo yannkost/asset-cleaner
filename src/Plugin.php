@@ -16,6 +16,7 @@ use craft\web\View;
 use craft\console\Application as ConsoleApplication;
 use yann\assetcleaner\assetbundles\assetcleaner\AssetCleanerAsset;
 use yann\assetcleaner\services\AssetUsageService;
+use yann\assetcleaner\services\ScanService;
 use yann\assetcleaner\utilities\AssetCleanerUtility;
 use yii\base\Event;
 
@@ -25,6 +26,7 @@ use yii\base\Event;
  * Identify and clean up unused assets in Craft CMS
  *
  * @property-read AssetUsageService $assetUsage
+ * @property-read ScanService $scan
  *
  * @since 1.0.0
  */
@@ -33,7 +35,7 @@ class Plugin extends BasePlugin
     /**
      * @var string
      */
-    public string $schemaVersion = '1.0.0';
+    public string $schemaVersion = '1.1.0';
 
     /**
      * @var bool
@@ -58,6 +60,7 @@ class Plugin extends BasePlugin
         return [
             'components' => [
                 'assetUsage' => AssetUsageService::class,
+                'scan' => ScanService::class,
             ],
         ];
     }
@@ -108,6 +111,8 @@ class Plugin extends BasePlugin
             'asset-cleaner/trash' => 'asset-cleaner/asset-cleaner/trash',
             'asset-cleaner/delete' => 'asset-cleaner/asset-cleaner/delete',
             'asset-cleaner/preview-delete' => 'asset-cleaner/asset-cleaner/preview-delete',
+            'asset-cleaner/scan-progress' => 'asset-cleaner/asset-cleaner/scan-progress',
+            'asset-cleaner/scan-results' => 'asset-cleaner/asset-cleaner/scan-results',
         ]);
     }
 

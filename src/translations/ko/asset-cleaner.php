@@ -73,4 +73,10 @@ return [
     'Failed to move assets to trash.' => '에셋을 휴지통으로 이동하는 데 실패했습니다.',
     'Failed to delete assets.' => '에셋 삭제에 실패했습니다.',
     'Failed to get asset usage.' => '에셋 사용 현황을 가져오는 데 실패했습니다.',
+
+    // Queue Scan
+    'Scan queued...' => '스캔 대기 중...',
+    'Scan failed.' => '스캔에 실패했습니다.',
+    'Scanning assets for usage' => '에셋 사용 현황 스캔 중',
+    'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => '큐가 실행되고 있지 않은 것 같습니다. 큐 워커가 활성화되어 있는지 확인하세요 (예: php craft queue/listen).',
 ];

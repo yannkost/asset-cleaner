@@ -12,6 +12,7 @@ use craft\elements\Asset;
 use craft\elements\Entry;
 use craft\elements\GlobalSet;
 use craft\fields\Assets as AssetsField;
+use yann\assetcleaner\helpers\Logger;
 
 /**
  * Asset Usage Service
@@ -319,6 +320,223 @@ class AssetUsageService extends Component
         }
 
         return $result;
+    }
+
+    /**
+     * Build a content index for efficient batch asset scanning.
+     *
+     * Instead of loading all entries for every asset, this loads entries once,
+     * pre-filters to only those with rich text content that might reference assets,
+     * and returns a flat [entryId => concatenatedContent] map.
+     *
+     * @return array{entries: array<int, string>, globals: array<string, string>}
+     */
+    public function buildContentIndex(): array
+    {
+        $htmlFieldTypes = [
+            'craft\\redactor\\Field',
+            'craft\\ckeditor\\Field',
+            'craft\\fields\\PlainText',
+        ];
+
+        // 1. Find field layouts that have rich text fields
+        $allFields = Craft::$app->getFields()->getAllFields();
+        $htmlFields = [];
+        $htmlFieldIds = [];
+        foreach ($allFields as $field) {
+            if (in_array(get_class($field), $htmlFieldTypes, true)) {
+                $htmlFields[] = $field;
+                $htmlFieldIds[] = $field->id;
+            }
+        }
+
+        if (empty($htmlFields)) {
+            return ['entries' => [], 'globals' => []];
+        }
+
+        // 2. Collect volume base paths/URLs for pre-filtering
+        $volumeIndicators = [];
+        foreach (Craft::$app->getVolumes()->getAllVolumes() as $volume) {
+            try {
+                $fs = $volume->getFs();
+                if (method_exists($fs, 'getRootUrl') && $fs->getRootUrl()) {
+                    $parsed = parse_url($fs->getRootUrl());
+                    if (isset($parsed['path'])) {
+                        $volumeIndicators[] = $parsed['path'];
+                    }
+                    $volumeIndicators[] = $fs->getRootUrl();
+                }
+                if (method_exists($fs, 'getRootPath') && $fs->getRootPath()) {
+                    $volumeIndicators[] = basename($fs->getRootPath());
+                }
+            } catch (\Throwable $e) {
+                // skip inaccessible volumes
+            }
+        }
+        // Deduplicate and remove empty strings
+        $volumeIndicators = array_values(array_unique(array_filter($volumeIndicators)));
+
+        // Fallback patterns if no volume paths available
+        $fallbackPatterns = ['.jpg', '.jpeg', '.png', '.gif', '.svg', '.pdf', '.webp', '.mp4', '.mp3', 'data-asset-id'];
+
+        // 3. Load all entries and build the index
+        $entryIndex = [];
+
+        // Process entries in batches to limit memory usage
+        $entryQuery = Entry::find()->status(null);
+        $batchSize = 200;
+
+        foreach ($entryQuery->each($batchSize) as $entry) {
+            $content = '';
+            foreach ($htmlFields as $field) {
+                try {
+                    $fieldValue = $entry->getFieldValue($field->handle);
+                } catch (\Throwable $e) {
+                    continue;
+                }
+
+                if ($fieldValue instanceof \craft\redactor\FieldData) {
+                    $fieldValue = $fieldValue->getRawContent();
+                } elseif (is_object($fieldValue) && method_exists($fieldValue, '__toString')) {
+                    $fieldValue = (string)$fieldValue;
+                }
+
+                if ($fieldValue && is_string($fieldValue)) {
+                    $content .= $fieldValue . "\n";
+                }
+            }
+
+            if (empty($content)) {
+                continue;
+            }
+
+            // Pre-filter: does this content contain any asset-like references?
+            $hasAssetReference = false;
+            if (!empty($volumeIndicators)) {
+                foreach ($volumeIndicators as $indicator) {
+                    if (str_contains($content, $indicator)) {
+                        $hasAssetReference = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!$hasAssetReference) {
+                foreach ($fallbackPatterns as $pattern) {
+                    if (str_contains($content, $pattern)) {
+                        $hasAssetReference = true;
+                        break;
+                    }
+                }
+            }
+
+            if ($hasAssetReference) {
+                $entryIndex[$entry->id] = $content;
+            }
+        }
+
+        // 4. Build globals index with same approach
+        $globalIndex = [];
+        $globalSets = GlobalSet::find()->all();
+
+        foreach ($globalSets as $globalSet) {
+            $fieldLayout = $globalSet->getFieldLayout();
+            if (!$fieldLayout) {
+                continue;
+            }
+
+            $content = '';
+            foreach ($fieldLayout->getCustomFields() as $field) {
+                if (!in_array(get_class($field), $htmlFieldTypes, true)) {
+                    continue;
+                }
+
+                $fieldValue = $globalSet->getFieldValue($field->handle);
+                if ($fieldValue instanceof \craft\redactor\FieldData) {
+                    $fieldValue = $fieldValue->getRawContent();
+                } elseif (is_object($fieldValue) && method_exists($fieldValue, '__toString')) {
+                    $fieldValue = (string)$fieldValue;
+                }
+
+                if ($fieldValue && is_string($fieldValue)) {
+                    $content .= $fieldValue . "\n";
+                }
+            }
+
+            if (!empty($content)) {
+                $globalIndex[$globalSet->handle] = $content;
+            }
+        }
+
+        return ['entries' => $entryIndex, 'globals' => $globalIndex];
+    }
+
+    /**
+     * Check if an asset is used, using a pre-built content index instead of
+     * loading all entries from scratch. Used during batch scanning.
+     *
+     * @param int $assetId
+     * @param array $contentIndex Output from buildContentIndex()
+     * @return bool
+     */
+    public function isAssetUsedWithIndex(int $assetId, array $contentIndex): bool
+    {
+        // 1. Check relations table first (fastest)
+        $hasRelation = (new Query())
+            ->from(Table::RELATIONS)
+            ->where(['targetId' => $assetId])
+            ->exists();
+
+        if ($hasRelation) {
+            return true;
+        }
+
+        // 2. Load asset for pattern building
+        $asset = Asset::find()->id($assetId)->one();
+        if (!$asset) {
+            return false;
+        }
+
+        $assetUrl = $asset->getUrl();
+        $searchPatterns = [$asset->filename];
+        if ($assetUrl) {
+            $searchPatterns[] = $assetUrl;
+            $parsedUrl = parse_url($assetUrl);
+            if (isset($parsedUrl['path'])) {
+                $searchPatterns[] = $parsedUrl['path'];
+            }
+        }
+        $folderPath = $asset->folderPath ?? '';
+        if ($folderPath) {
+            $searchPatterns[] = $folderPath . $asset->filename;
+        }
+        $dataAssetPattern = 'data-asset-id="' . $assetId . '"';
+
+        // 3. Search the pre-built entry content index
+        foreach ($contentIndex['entries'] ?? [] as $entryContent) {
+            foreach ($searchPatterns as $pattern) {
+                if ($pattern && str_contains($entryContent, $pattern)) {
+                    return true;
+                }
+            }
+            if (str_contains($entryContent, $dataAssetPattern)) {
+                return true;
+            }
+        }
+
+        // 4. Search globals index
+        foreach ($contentIndex['globals'] ?? [] as $globalContent) {
+            foreach ($searchPatterns as $pattern) {
+                if ($pattern && str_contains($globalContent, $pattern)) {
+                    return true;
+                }
+            }
+            if (str_contains($globalContent, $dataAssetPattern)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

@@ -73,4 +73,10 @@ return [
     'Failed to move assets to trash.' => 'Échec du déplacement des assets vers la corbeille.',
     'Failed to delete assets.' => 'Échec de la suppression des assets.',
     'Failed to get asset usage.' => 'Échec de la récupération de l\'utilisation de l\'asset.',
+
+    // Queue Scan
+    'Scan queued...' => 'Scan en file d\'attente...',
+    'Scan failed.' => 'Le scan a échoué.',
+    'Scanning assets for usage' => 'Analyse de l\'utilisation des assets',
+    'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => 'La file d\'attente ne semble pas être en cours d\'exécution. Assurez-vous qu\'un worker est actif (ex : php craft queue/listen).',
 ];

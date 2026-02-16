@@ -9,6 +9,7 @@ use craft\elements\Asset;
 use craft\helpers\FileHelper;
 use craft\web\Controller;
 use yann\assetcleaner\helpers\Logger;
+use yann\assetcleaner\jobs\ScanAssetsJob;
 use yann\assetcleaner\Plugin;
 use yii\web\Response;
 use ZipArchive;
@@ -41,7 +42,7 @@ class AssetCleanerController extends Controller
     }
 
     /**
-     * Start scan - returns unused/used counts
+     * Start scan — queues a background job and returns the scan ID
      *
      * @return Response
      */
@@ -59,25 +60,94 @@ class AssetCleanerController extends Controller
 
             $volumeIds = array_map('intval', $volumeIds);
 
-            $service = Plugin::getInstance()->assetUsage;
+            $scanService = Plugin::getInstance()->scan;
 
-            $unusedCount = $service->countUnusedAssets($volumeIds);
-            $usedCount = $service->countUsedAssets($volumeIds);
-            $unusedAssets = $service->getUnusedAssets($volumeIds);
+            // Cancel any active scans
+            $scanService->cancelActiveScan();
+
+            // Cleanup old scan records
+            $scanService->cleanupOldScans();
+
+            // Create a new pending scan
+            $scanId = $scanService->createScan($volumeIds);
+
+            // Push to the queue
+            Craft::$app->getQueue()->push(new ScanAssetsJob([
+                'scanId' => $scanId,
+                'volumeIds' => $volumeIds,
+            ]));
 
             return $this->asJson([
                 'success' => true,
-                'usedCount' => $usedCount,
-                'unusedCount' => $unusedCount,
-                'unusedAssets' => $unusedAssets,
+                'scanId' => $scanId,
             ]);
         } catch (\Throwable $e) {
-            Logger::exception('Failed to scan volumes', $e);
+            Logger::exception('Failed to start scan', $e);
             return $this->asJson([
                 'success' => false,
                 'error' => Craft::t('asset-cleaner', 'Failed to scan volumes.'),
             ]);
         }
+    }
+
+    /**
+     * Poll scan progress
+     *
+     * @return Response
+     */
+    public function actionScanProgress(): Response
+    {
+        $this->requireAcceptsJson();
+
+        $scanId = (int)Craft::$app->getRequest()->getQueryParam('scanId', 0);
+        if (!$scanId) {
+            return $this->asJson(['success' => false, 'error' => 'Missing scanId.']);
+        }
+
+        $scan = Plugin::getInstance()->scan->getScan($scanId);
+        if (!$scan) {
+            return $this->asJson(['success' => false, 'error' => 'Scan not found.']);
+        }
+
+        return $this->asJson([
+            'success' => true,
+            'status' => $scan['status'],
+            'progress' => (int)$scan['progress'],
+            'totalAssets' => (int)$scan['totalAssets'],
+            'processedAssets' => (int)$scan['processedAssets'],
+            'usedCount' => (int)$scan['usedCount'],
+            'unusedCount' => (int)$scan['unusedCount'],
+            'error' => $scan['error'],
+        ]);
+    }
+
+    /**
+     * Get full results from a completed scan
+     *
+     * @return Response
+     */
+    public function actionScanResults(): Response
+    {
+        $this->requireAcceptsJson();
+
+        $scanId = (int)Craft::$app->getRequest()->getQueryParam('scanId', 0);
+        if (!$scanId) {
+            return $this->asJson(['success' => false, 'error' => 'Missing scanId.']);
+        }
+
+        $scan = Plugin::getInstance()->scan->getScan($scanId);
+        if (!$scan || $scan['status'] !== 'complete') {
+            return $this->asJson(['success' => false, 'error' => 'Scan not complete.']);
+        }
+
+        $unusedAssets = json_decode($scan['results'] ?? '[]', true) ?: [];
+
+        return $this->asJson([
+            'success' => true,
+            'usedCount' => (int)$scan['usedCount'],
+            'unusedCount' => (int)$scan['unusedCount'],
+            'unusedAssets' => $unusedAssets,
+        ]);
     }
 
     /**

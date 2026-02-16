@@ -73,4 +73,10 @@ return [
     'Failed to move assets to trash.' => 'Verplaatsen van assets naar prullenbak mislukt.',
     'Failed to delete assets.' => 'Verwijderen van assets mislukt.',
     'Failed to get asset usage.' => 'Ophalen van asset-gebruik mislukt.',
+
+    // Queue Scan
+    'Scan queued...' => 'Scan in wachtrij...',
+    'Scan failed.' => 'Scan mislukt.',
+    'Scanning assets for usage' => 'Assets scannen op gebruik',
+    'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => 'De wachtrij lijkt niet actief te zijn. Zorg ervoor dat een queue worker actief is (bijv. php craft queue/listen).',
 ];

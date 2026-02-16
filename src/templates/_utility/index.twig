@@ -34,6 +34,9 @@
             </div>
             <div class="progress-text">0%</div>
         </div>
+        <div class="asset-cleaner-queue-hint" style="display: none;">
+            {{ 'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).'|t('asset-cleaner') }}
+        </div>
     </div>
 
     <div class="asset-cleaner-results" style="display: none;">

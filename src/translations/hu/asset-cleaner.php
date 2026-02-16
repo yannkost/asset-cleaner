@@ -73,4 +73,10 @@ return [
     'Failed to move assets to trash.' => 'Eszközök kukába helyezése sikertelen.',
     'Failed to delete assets.' => 'Eszközök törlése sikertelen.',
     'Failed to get asset usage.' => 'Eszköz használati adatok lekérése sikertelen.',
+
+    // Queue Scan
+    'Scan queued...' => 'Vizsgálat sorba állítva...',
+    'Scan failed.' => 'A vizsgálat sikertelen.',
+    'Scanning assets for usage' => 'Fájlhasználat vizsgálata',
+    'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => 'Úgy tűnik, a sor nem fut. Győződjön meg arról, hogy egy sor-feldolgozó aktív (pl. php craft queue/listen).',
 ];

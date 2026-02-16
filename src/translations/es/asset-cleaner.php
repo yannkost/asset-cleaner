@@ -73,4 +73,10 @@ return [
     'Failed to move assets to trash.' => 'Error al mover assets a la papelera.',
     'Failed to delete assets.' => 'Error al eliminar assets.',
     'Failed to get asset usage.' => 'Error al obtener uso del asset.',
+
+    // Queue Scan
+    'Scan queued...' => 'Escaneo en cola...',
+    'Scan failed.' => 'El escaneo falló.',
+    'Scanning assets for usage' => 'Escaneando assets en uso',
+    'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => 'La cola no parece estar en ejecución. Asegúrese de que un worker de cola esté activo (ej: php craft queue/listen).',
 ];

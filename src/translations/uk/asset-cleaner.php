@@ -73,4 +73,10 @@ return [
     'Failed to move assets to trash.' => 'Не вдалося перемістити ресурси в кошик.',
     'Failed to delete assets.' => 'Не вдалося видалити ресурси.',
     'Failed to get asset usage.' => 'Не вдалося отримати інформацію про використання ресурсу.',
+
+    // Queue Scan
+    'Scan queued...' => 'Сканування в черзі...',
+    'Scan failed.' => 'Сканування не вдалося.',
+    'Scanning assets for usage' => 'Сканування використання ресурсів',
+    'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => 'Черга, схоже, не запущена. Переконайтеся, що worker черги активний (наприклад, php craft queue/listen).',
 ];
