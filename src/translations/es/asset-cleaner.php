@@ -79,4 +79,8 @@ return [
     'Scan failed.' => 'El escaneo falló.',
     'Scanning assets for usage' => 'Escaneando assets en uso',
     'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => 'La cola no parece estar en ejecución. Asegúrese de que un worker de cola esté activo (ej: php craft queue/listen).',
+
+    // Scan Time
+    'Scanned on {date}' => 'Escaneado el {date}',
+    'Restoring last scan...' => 'Restaurando último escaneo...',
 ];

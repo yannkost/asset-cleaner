@@ -79,4 +79,8 @@ return [
     'Scan failed.' => 'Tarama başarısız oldu.',
     'Scanning assets for usage' => 'Varlık kullanımı taranıyor',
     'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => 'Kuyruk çalışmıyor gibi görünüyor. Bir kuyruk işçisinin aktif olduğundan emin olun (örn: php craft queue/listen).',
+
+    // Scan Time
+    'Scanned on {date}' => '{date} tarihinde tarandı',
+    'Restoring last scan...' => 'Son tarama geri yükleniyor...',
 ];

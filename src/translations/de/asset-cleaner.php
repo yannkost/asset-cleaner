@@ -79,4 +79,8 @@ return [
     'Scan failed.' => 'Scan fehlgeschlagen.',
     'Scanning assets for usage' => 'Assets auf Nutzung prüfen',
     'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => 'Die Warteschlange scheint nicht zu laufen. Stellen Sie sicher, dass ein Queue-Worker aktiv ist (z.B. php craft queue/listen).',
+
+    // Scan Time
+    'Scanned on {date}' => 'Gescannt am {date}',
+    'Restoring last scan...' => 'Letzten Scan wiederherstellen...',
 ];

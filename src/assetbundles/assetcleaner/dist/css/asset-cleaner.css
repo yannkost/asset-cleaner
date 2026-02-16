@@ -167,8 +167,20 @@
     color: var(--gray-600);
 }
 
-.asset-cleaner-results h2 {
+.asset-cleaner-results-header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
     margin-bottom: 16px;
+}
+
+.asset-cleaner-results-header h2 {
+    margin-bottom: 0;
+}
+
+.asset-cleaner-scan-time {
+    font-size: 13px;
+    color: var(--error-color);
 }
 
 .asset-cleaner-stats {

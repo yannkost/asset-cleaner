@@ -79,4 +79,8 @@ return [
     'Scan failed.' => 'A vizsgálat sikertelen.',
     'Scanning assets for usage' => 'Fájlhasználat vizsgálata',
     'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => 'Úgy tűnik, a sor nem fut. Győződjön meg arról, hogy egy sor-feldolgozó aktív (pl. php craft queue/listen).',
+
+    // Scan Time
+    'Scanned on {date}' => 'Szkennelve: {date}',
+    'Restoring last scan...' => 'Utolsó szkennelés visszaállítása...',
 ];

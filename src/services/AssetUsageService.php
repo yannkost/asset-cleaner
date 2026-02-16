@@ -159,16 +159,24 @@ class AssetUsageService extends Component
                 }
                 
                 if ($fieldValue && is_string($fieldValue)) {
+                    $found = false;
                     foreach ($searchPatterns as $pattern) {
                         if (str_contains($fieldValue, $pattern)) {
-                            $results[] = [
-                                'type' => 'global',
-                                'handle' => $globalSet->handle,
-                                'name' => $globalSet->name,
-                                'field' => $field->name,
-                            ];
+                            $found = true;
                             break;
                         }
+                    }
+                    if (!$found) {
+                        $found = str_contains($fieldValue, 'data-asset-id="' . $asset->id . '"')
+                            || str_contains($fieldValue, '#asset:' . $asset->id);
+                    }
+                    if ($found) {
+                        $results[] = [
+                            'type' => 'global',
+                            'handle' => $globalSet->handle,
+                            'name' => $globalSet->name,
+                            'field' => $field->name,
+                        ];
                     }
                 }
             }
@@ -560,6 +568,7 @@ class AssetUsageService extends Component
             $searchPatterns[] = $folderPath . $asset->filename;
         }
         $dataAssetPattern = 'data-asset-id="' . $assetId . '"';
+        $hashAssetPattern = '#asset:' . $assetId;
 
         // 3. Search the pre-built entry content index
         foreach ($contentIndex['entries'] ?? [] as $entryContent) {
@@ -568,7 +577,7 @@ class AssetUsageService extends Component
                     return true;
                 }
             }
-            if (str_contains($entryContent, $dataAssetPattern)) {
+            if (str_contains($entryContent, $dataAssetPattern) || str_contains($entryContent, $hashAssetPattern)) {
                 return true;
             }
         }
@@ -580,7 +589,7 @@ class AssetUsageService extends Component
                     return true;
                 }
             }
-            if (str_contains($globalContent, $dataAssetPattern)) {
+            if (str_contains($globalContent, $dataAssetPattern) || str_contains($globalContent, $hashAssetPattern)) {
                 return true;
             }
         }
@@ -678,8 +687,9 @@ class AssetUsageService extends Component
                 }
                 
                 if (!$found) {
-                    // Also check for data-asset-id attribute
-                    $found = str_contains($fieldValue, 'data-asset-id="' . $asset->id . '"');
+                    // Also check for data-asset-id attribute and #asset:ID fragment (CKEditor/Redactor)
+                    $found = str_contains($fieldValue, 'data-asset-id="' . $asset->id . '"')
+                        || str_contains($fieldValue, '#asset:' . $asset->id);
                 }
                 
                 if ($found) {

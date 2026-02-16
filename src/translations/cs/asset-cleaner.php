@@ -79,4 +79,8 @@ return [
     'Scan failed.' => 'Skenování selhalo.',
     'Scanning assets for usage' => 'Skenování využití souborů',
     'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => 'Fronta zřejmě neběží. Ujistěte se, že je worker fronty aktivní (např. php craft queue/listen).',
+
+    // Scan Time
+    'Scanned on {date}' => 'Naskenováno {date}',
+    'Restoring last scan...' => 'Obnovování posledního skenu...',
 ];

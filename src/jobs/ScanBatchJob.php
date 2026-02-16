@@ -162,6 +162,12 @@ class ScanBatchJob extends BaseJob
             'unusedCount' => count($unusedIds),
         ]);
 
+        // Store last-scan metadata for auto-restore on page load
+        $cache->set('asset-cleaner-last-scan', [
+            'scanId' => $this->scanId,
+            'completedAt' => time(),
+        ], 3600);
+
         // Clean up temporary cache keys
         $cache->delete("asset-cleaner-index-{$this->scanId}");
         $cache->delete("asset-cleaner-unused-{$this->scanId}");

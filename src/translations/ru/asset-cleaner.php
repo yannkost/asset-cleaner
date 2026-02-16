@@ -79,4 +79,8 @@ return [
     'Scan failed.' => 'Сканирование не удалось.',
     'Scanning assets for usage' => 'Сканирование использования ресурсов',
     'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => 'Очередь, похоже, не запущена. Убедитесь, что worker очереди активен (например, php craft queue/listen).',
+
+    // Scan Time
+    'Scanned on {date}' => 'Сканирование выполнено {date}',
+    'Restoring last scan...' => 'Восстановление последнего сканирования...',
 ];

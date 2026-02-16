@@ -79,4 +79,8 @@ return [
     'Scan failed.' => '扫描失败。',
     'Scanning assets for usage' => '正在扫描资源使用情况',
     'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => '队列似乎未在运行。请确保队列工作进程处于活动状态（例如：php craft queue/listen）。',
+
+    // Scan Time
+    'Scanned on {date}' => '扫描于 {date}',
+    'Restoring last scan...' => '正在恢复上次扫描...',
 ];

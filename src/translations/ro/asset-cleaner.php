@@ -79,4 +79,8 @@ return [
     'Scan failed.' => 'Scanarea a eșuat.',
     'Scanning assets for usage' => 'Scanarea utilizării resurselor',
     'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => 'Coada nu pare să ruleze. Asigurați-vă că un worker de coadă este activ (ex: php craft queue/listen).',
+
+    // Scan Time
+    'Scanned on {date}' => 'Scanat pe {date}',
+    'Restoring last scan...' => 'Restaurarea ultimei scanări...',
 ];

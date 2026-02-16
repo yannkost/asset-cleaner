@@ -79,4 +79,8 @@ return [
     'Scan failed.' => '스캔에 실패했습니다.',
     'Scanning assets for usage' => '에셋 사용 현황 스캔 중',
     'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => '큐가 실행되고 있지 않은 것 같습니다. 큐 워커가 활성화되어 있는지 확인하세요 (예: php craft queue/listen).',
+
+    // Scan Time
+    'Scanned on {date}' => '{date}에 스캔됨',
+    'Restoring last scan...' => '마지막 스캔 복원 중...',
 ];

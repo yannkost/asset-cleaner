@@ -161,6 +161,96 @@
         if (deleteBtn) {
             deleteBtn.addEventListener('click', handleDeletePermanently);
         }
+
+        // Auto-restore last scan results
+        if (settings.lastScanId) {
+            restoreLastScan(utilityContainer, settings.lastScanId, settings.lastScanTime);
+        }
+    }
+
+    function restoreLastScan(container, scanId, scanTime) {
+        var loading = container.querySelector('.asset-cleaner-loading');
+        var results = container.querySelector('.asset-cleaner-results');
+        var loadingText = loading.querySelector('.loading-text');
+
+        // Show a brief loading state
+        loading.style.display = 'flex';
+        loadingText.textContent = t.restoringLastScan || 'Restoring last scan...';
+
+        Craft.sendActionRequest('GET', 'asset-cleaner/asset-cleaner/scan-results', {
+            params: { scanId: scanId }
+        })
+        .then(function(resultsResponse) {
+            loading.style.display = 'none';
+
+            var data = resultsResponse.data;
+            if (!data || !data.success) {
+                return;
+            }
+
+            try {
+                results.style.display = 'block';
+                container.querySelector('.used-count').textContent = data.usedCount;
+                container.querySelector('.unused-count').textContent = data.unusedCount;
+
+                unusedAssets = data.unusedAssets || [];
+                selectedAssetIds = unusedAssets.map(function(a) { return a.id; });
+
+                // Build volumeNames from the assets themselves
+                var volumeNames = {};
+                unusedAssets.forEach(function(asset) {
+                    if (asset.volumeId && asset.volume) {
+                        volumeNames[asset.volumeId] = asset.volume;
+                    }
+                });
+
+                renderVolumesTables(container, unusedAssets, volumeNames);
+
+                var uniqueVolumes = new Set();
+                unusedAssets.forEach(function(asset) {
+                    uniqueVolumes.add(asset.volumeId);
+                });
+                var volumeCount = uniqueVolumes.size;
+
+                var actions = container.querySelector('.asset-cleaner-actions');
+                var separator = container.querySelector('.asset-cleaner-separator');
+
+                if (unusedAssets.length > 0 && volumeCount > 1) {
+                    actions.style.display = 'block';
+                    separator.style.display = 'block';
+                } else {
+                    actions.style.display = 'none';
+                    separator.style.display = 'none';
+                }
+
+                // Show scan timestamp
+                showScanTime(container, scanTime);
+            } catch (e) {
+                // Don't freeze the UI if rendering fails
+            }
+        })
+        .catch(function() {
+            loading.style.display = 'none';
+        });
+    }
+
+    function showScanTime(container, isoTime) {
+        var el = container.querySelector('.asset-cleaner-scan-time');
+        if (!el || !isoTime) return;
+
+        var date = new Date(isoTime);
+        var formatted = date.toLocaleDateString(undefined, {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+        }) + ' at ' + date.toLocaleTimeString(undefined, {
+            hour: 'numeric',
+            minute: '2-digit',
+        });
+
+        var template = t.scannedOn || 'Scanned on {date}';
+        el.textContent = template.replace('{date}', formatted);
+        el.style.display = 'inline';
     }
 
     function debounce(func, wait) {
@@ -300,6 +390,9 @@
                                 actions.style.display = 'none';
                                 separator.style.display = 'none';
                             }
+
+                            // Show scan timestamp
+                            showScanTime(container, new Date().toISOString());
                         })
                         .catch(function() {
                             loading.style.display = 'none';
