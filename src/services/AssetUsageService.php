@@ -146,7 +146,7 @@ class AssetUsageService extends Component
             
             foreach ($fieldLayout->getCustomFields() as $field) {
                 $fieldClass = get_class($field);
-                if (!in_array($fieldClass, ['craft\\redactor\\Field', 'craft\\ckeditor\\Field', 'craft\\fields\\PlainText'], true)) {
+                if (!in_array($fieldClass, ['craft\\redactor\\Field', 'craft\\ckeditor\\Field'], true)) {
                     continue;
                 }
                 
@@ -325,9 +325,8 @@ class AssetUsageService extends Component
     /**
      * Build a content index for efficient batch asset scanning.
      *
-     * Instead of loading all entries for every asset, this loads entries once,
-     * pre-filters to only those with rich text content that might reference assets,
-     * and returns a flat [entryId => concatenatedContent] map.
+     * Only loads entries whose entry types have CKEditor/Redactor fields,
+     * skipping entire sections that don't have rich text.
      *
      * @return array{entries: array<int, string>, globals: array<string, string>}
      */
@@ -336,10 +335,9 @@ class AssetUsageService extends Component
         $htmlFieldTypes = [
             'craft\\redactor\\Field',
             'craft\\ckeditor\\Field',
-            'craft\\fields\\PlainText',
         ];
 
-        // 1. Find field layouts that have rich text fields
+        // 1. Find all rich text fields
         $allFields = Craft::$app->getFields()->getAllFields();
         $htmlFields = [];
         $htmlFieldIds = [];
@@ -354,7 +352,10 @@ class AssetUsageService extends Component
             return ['entries' => [], 'globals' => []];
         }
 
-        // 2. Collect volume base paths/URLs for pre-filtering
+        // 2. Find entry types whose field layouts contain rich text fields
+        $relevantTypeIds = $this->getEntryTypeIdsWithFields($htmlFieldIds);
+
+        // 3. Collect volume base paths/URLs for pre-filtering
         $volumeIndicators = [];
         foreach (Craft::$app->getVolumes()->getAllVolumes() as $volume) {
             try {
@@ -373,19 +374,22 @@ class AssetUsageService extends Component
                 // skip inaccessible volumes
             }
         }
-        // Deduplicate and remove empty strings
         $volumeIndicators = array_values(array_unique(array_filter($volumeIndicators)));
 
-        // Fallback patterns if no volume paths available
         $fallbackPatterns = ['.jpg', '.jpeg', '.png', '.gif', '.svg', '.pdf', '.webp', '.mp4', '.mp3', 'data-asset-id'];
 
-        // 3. Load all entries and build the index
+        // 4. Load only entries with relevant entry types
         $entryIndex = [];
 
-        // Process entries in batches to limit memory usage
         $entryQuery = Entry::find()->status(null);
-        $batchSize = 200;
+        if (!empty($relevantTypeIds)) {
+            $entryQuery->typeId($relevantTypeIds);
+        } else {
+            // No entry types have rich text fields — skip entries entirely
+            return ['entries' => [], 'globals' => $this->buildGlobalsIndex($htmlFieldTypes)];
+        }
 
+        $batchSize = 200;
         foreach ($entryQuery->each($batchSize) as $entry) {
             $content = '';
             foreach ($htmlFields as $field) {
@@ -435,7 +439,52 @@ class AssetUsageService extends Component
             }
         }
 
-        // 4. Build globals index with same approach
+        return ['entries' => $entryIndex, 'globals' => $this->buildGlobalsIndex($htmlFieldTypes)];
+    }
+
+    /**
+     * Get entry type IDs whose field layouts contain any of the given field IDs
+     *
+     * @param array $fieldIds
+     * @return array
+     */
+    private function getEntryTypeIdsWithFields(array $fieldIds): array
+    {
+        if (empty($fieldIds)) {
+            return [];
+        }
+
+        // Get all field layouts and check which ones contain our target fields
+        $relevantLayoutIds = [];
+        foreach (Craft::$app->getFields()->getAllLayouts() as $layout) {
+            foreach ($layout->getCustomFields() as $field) {
+                if (in_array($field->id, $fieldIds, true)) {
+                    $relevantLayoutIds[] = $layout->id;
+                    break;
+                }
+            }
+        }
+
+        if (empty($relevantLayoutIds)) {
+            return [];
+        }
+
+        // Find entry types that use those field layout IDs
+        return (new Query())
+            ->select(['id'])
+            ->from('{{%entrytypes}}')
+            ->where(['fieldLayoutId' => $relevantLayoutIds])
+            ->column();
+    }
+
+    /**
+     * Build globals content index
+     *
+     * @param array $htmlFieldTypes
+     * @return array<string, string>
+     */
+    private function buildGlobalsIndex(array $htmlFieldTypes): array
+    {
         $globalIndex = [];
         $globalSets = GlobalSet::find()->all();
 
@@ -468,7 +517,7 @@ class AssetUsageService extends Component
             }
         }
 
-        return ['entries' => $entryIndex, 'globals' => $globalIndex];
+        return $globalIndex;
     }
 
     /**
@@ -575,9 +624,8 @@ class AssetUsageService extends Component
         $htmlFieldTypes = [
             'craft\\redactor\\Field',
             'craft\\ckeditor\\Field',
-            'craft\\fields\\PlainText',
         ];
-        
+
         $htmlFields = [];
         foreach ($fields as $field) {
             if (in_array(get_class($field), $htmlFieldTypes, true)) {
@@ -589,9 +637,15 @@ class AssetUsageService extends Component
             return $results;
         }
 
-        // Query ALL entries and check their content directly
-        // This is more thorough than relying on Craft's search index
+        // Only query entries whose entry types have rich text fields
+        $htmlFieldIds = array_map(fn($f) => $f->id, $htmlFields);
+        $relevantTypeIds = $this->getEntryTypeIdsWithFields($htmlFieldIds);
+        if (empty($relevantTypeIds)) {
+            return $results;
+        }
+
         $entries = Entry::find()
+            ->typeId($relevantTypeIds)
             ->status(null)
             ->all();
 
