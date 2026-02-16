@@ -73,4 +73,14 @@ return [
     'Failed to move assets to trash.' => 'فشل نقل الأصول إلى سلة المهملات.',
     'Failed to delete assets.' => 'فشل حذف الأصول.',
     'Failed to get asset usage.' => 'فشل الحصول على استخدام الأصل.',
+
+    // Queue Scan
+    'Scan queued...' => 'الفحص في قائمة الانتظار...',
+    'Scan failed.' => 'فشل الفحص.',
+    'Scanning assets for usage' => 'فحص استخدام الأصول',
+    'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => 'لا يبدو أن قائمة الانتظار تعمل. تأكد من أن عامل قائمة الانتظار نشط (مثال: php craft queue/listen).',
+
+    // Scan Time
+    'Scanned on {date}' => 'تم المسح في {date}',
+    'Restoring last scan...' => 'استعادة آخر مسح...',
 ];

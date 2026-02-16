@@ -108,6 +108,8 @@ class Plugin extends BasePlugin
             'asset-cleaner/trash' => 'asset-cleaner/asset-cleaner/trash',
             'asset-cleaner/delete' => 'asset-cleaner/asset-cleaner/delete',
             'asset-cleaner/preview-delete' => 'asset-cleaner/asset-cleaner/preview-delete',
+            'asset-cleaner/scan-progress' => 'asset-cleaner/asset-cleaner/scan-progress',
+            'asset-cleaner/scan-results' => 'asset-cleaner/asset-cleaner/scan-results',
         ]);
     }
 
@@ -129,17 +131,34 @@ class Plugin extends BasePlugin
                     $view = Craft::$app->getView();
                     $view->registerAssetBundle(AssetCleanerAsset::class);
 
+                    $jsSettings = [
+                        'translations' => [
+                            'viewUsage' => Craft::t('asset-cleaner', 'View Usage'),
+                            'usedByEntries' => Craft::t('asset-cleaner', 'Used by Entries'),
+                            'usedInContentFields' => Craft::t('asset-cleaner', 'Used in Content Fields'),
+                            'notUsed' => Craft::t('asset-cleaner', 'This asset is not used anywhere.'),
+                            'loading' => Craft::t('asset-cleaner', 'Loading...'),
+                            'error' => Craft::t('asset-cleaner', 'An error occurred.'),
+                            'scannedOn' => Craft::t('asset-cleaner', 'Scanned on {date}'),
+                            'restoringLastScan' => Craft::t('asset-cleaner', 'Restoring last scan...'),
+                        ],
+                    ];
+
+                    // Check for last scan results to auto-restore
+                    try {
+                        $cache = Craft::$app->getCache();
+                        $lastScan = $cache->get('asset-cleaner-last-scan');
+                        if (is_array($lastScan) && !empty($lastScan['scanId']) && !empty($lastScan['completedAt'])
+                            && $cache->get("asset-cleaner-results-{$lastScan['scanId']}") !== false) {
+                            $jsSettings['lastScanId'] = $lastScan['scanId'];
+                            $jsSettings['lastScanTime'] = date('c', (int)$lastScan['completedAt']);
+                        }
+                    } catch (\Throwable $e) {
+                        Craft::warning('Could not read last scan cache: ' . $e->getMessage(), __METHOD__);
+                    }
+
                     $view->registerJs(
-                        'window.AssetCleanerSettings = ' . json_encode([
-                            'translations' => [
-                                'viewUsage' => Craft::t('asset-cleaner', 'View Usage'),
-                                'usedByEntries' => Craft::t('asset-cleaner', 'Used by Entries'),
-                                'usedInContentFields' => Craft::t('asset-cleaner', 'Used in Content Fields'),
-                                'notUsed' => Craft::t('asset-cleaner', 'This asset is not used anywhere.'),
-                                'loading' => Craft::t('asset-cleaner', 'Loading...'),
-                                'error' => Craft::t('asset-cleaner', 'An error occurred.'),
-                            ],
-                        ]) . ';',
+                        'window.AssetCleanerSettings = ' . json_encode($jsSettings) . ';',
                         View::POS_HEAD
                     );
                 } catch (\Throwable $e) {

@@ -34,11 +34,17 @@
             </div>
             <div class="progress-text">0%</div>
         </div>
+        <div class="asset-cleaner-queue-hint" style="display: none;">
+            {{ 'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).'|t('asset-cleaner') }}
+        </div>
     </div>
 
     <div class="asset-cleaner-results" style="display: none;">
-        <h2>{{ 'Results'|t('asset-cleaner') }}</h2>
-        
+        <div class="asset-cleaner-results-header">
+            <h2>{{ 'Results'|t('asset-cleaner') }}</h2>
+            <span class="asset-cleaner-scan-time" style="display: none;"></span>
+        </div>
+
         <div class="asset-cleaner-stats">
             <div class="stat-box used">
                 <span class="stat-label">{{ 'Used Assets'|t('asset-cleaner') }}</span>

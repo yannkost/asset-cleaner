@@ -73,4 +73,14 @@ return [
     'Failed to move assets to trash.' => 'Неуспешно преместване на ресурси в кошчето.',
     'Failed to delete assets.' => 'Неуспешно изтриване на ресурси.',
     'Failed to get asset usage.' => 'Неуспешно получаване на информация за използване на ресурс.',
+
+    // Queue Scan
+    'Scan queued...' => 'Сканирането е в опашката...',
+    'Scan failed.' => 'Сканирането се провали.',
+    'Scanning assets for usage' => 'Сканиране на използването на ресурси',
+    'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => 'Опашката изглежда не работи. Уверете се, че worker на опашката е активен (напр. php craft queue/listen).',
+
+    // Scan Time
+    'Scanned on {date}' => 'Сканирано на {date}',
+    'Restoring last scan...' => 'Възстановяване на последното сканиране...',
 ];

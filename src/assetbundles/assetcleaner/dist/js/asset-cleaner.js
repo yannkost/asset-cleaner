@@ -161,6 +161,96 @@
         if (deleteBtn) {
             deleteBtn.addEventListener('click', handleDeletePermanently);
         }
+
+        // Auto-restore last scan results
+        if (settings.lastScanId) {
+            restoreLastScan(utilityContainer, settings.lastScanId, settings.lastScanTime);
+        }
+    }
+
+    function restoreLastScan(container, scanId, scanTime) {
+        var loading = container.querySelector('.asset-cleaner-loading');
+        var results = container.querySelector('.asset-cleaner-results');
+        var loadingText = loading.querySelector('.loading-text');
+
+        // Show a brief loading state
+        loading.style.display = 'flex';
+        loadingText.textContent = t.restoringLastScan || 'Restoring last scan...';
+
+        Craft.sendActionRequest('GET', 'asset-cleaner/asset-cleaner/scan-results', {
+            params: { scanId: scanId }
+        })
+        .then(function(resultsResponse) {
+            loading.style.display = 'none';
+
+            var data = resultsResponse.data;
+            if (!data || !data.success) {
+                return;
+            }
+
+            try {
+                results.style.display = 'block';
+                container.querySelector('.used-count').textContent = data.usedCount;
+                container.querySelector('.unused-count').textContent = data.unusedCount;
+
+                unusedAssets = data.unusedAssets || [];
+                selectedAssetIds = unusedAssets.map(function(a) { return a.id; });
+
+                // Build volumeNames from the assets themselves
+                var volumeNames = {};
+                unusedAssets.forEach(function(asset) {
+                    if (asset.volumeId && asset.volume) {
+                        volumeNames[asset.volumeId] = asset.volume;
+                    }
+                });
+
+                renderVolumesTables(container, unusedAssets, volumeNames);
+
+                var uniqueVolumes = new Set();
+                unusedAssets.forEach(function(asset) {
+                    uniqueVolumes.add(asset.volumeId);
+                });
+                var volumeCount = uniqueVolumes.size;
+
+                var actions = container.querySelector('.asset-cleaner-actions');
+                var separator = container.querySelector('.asset-cleaner-separator');
+
+                if (unusedAssets.length > 0 && volumeCount > 1) {
+                    actions.style.display = 'block';
+                    separator.style.display = 'block';
+                } else {
+                    actions.style.display = 'none';
+                    separator.style.display = 'none';
+                }
+
+                // Show scan timestamp
+                showScanTime(container, scanTime);
+            } catch (e) {
+                // Don't freeze the UI if rendering fails
+            }
+        })
+        .catch(function() {
+            loading.style.display = 'none';
+        });
+    }
+
+    function showScanTime(container, isoTime) {
+        var el = container.querySelector('.asset-cleaner-scan-time');
+        if (!el || !isoTime) return;
+
+        var date = new Date(isoTime);
+        var formatted = date.toLocaleDateString(undefined, {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+        }) + ' at ' + date.toLocaleTimeString(undefined, {
+            hour: 'numeric',
+            minute: '2-digit',
+        });
+
+        var template = t.scannedOn || 'Scanned on {date}';
+        el.textContent = template.replace('{date}', formatted);
+        el.style.display = 'inline';
     }
 
     function debounce(func, wait) {
@@ -182,6 +272,9 @@
         const progressBarContainer = loading.querySelector('.progress-bar-container');
         const progressBarFill = loading.querySelector('.progress-bar-fill');
         const progressText = loading.querySelector('.progress-text');
+        const loadingText = loading.querySelector('.loading-text');
+        const queueHint = container.querySelector('.asset-cleaner-queue-hint');
+        const scanBtn = container.querySelector('.asset-cleaner-scan-btn');
 
         // Get selected volumes
         const volumeIds = [];
@@ -192,72 +285,143 @@
             volumeNames[cb.value] = label ? label.textContent.trim() : 'Volume ' + cb.value;
         });
 
+        // Disable scan button to prevent double-clicks
+        scanBtn.disabled = true;
+
         // Show loading with progress bar
         loading.style.display = 'flex';
         progressBarContainer.style.display = 'block';
         results.style.display = 'none';
-        
-        // Simulate progress (since scan happens in one request)
-        let progress = 0;
-        const progressInterval = setInterval(function() {
-            progress += 5;
-            if (progress >= 90) {
-                clearInterval(progressInterval);
-            }
-            progressBarFill.style.width = progress + '%';
-            progressText.textContent = progress + '%';
-        }, 100);
+        if (queueHint) queueHint.style.display = 'none';
+        progressBarFill.style.width = '0%';
+        progressText.textContent = '0%';
+        loadingText.textContent = 'Scan queued...';
+
+        var pollTimer = null;
+        var queueHintTimer = null;
+        var scanStartTime = Date.now();
 
         Craft.sendActionRequest('POST', 'asset-cleaner/asset-cleaner/start-scan', {
             data: { volumeIds: volumeIds }
         })
         .then(function(response) {
-            clearInterval(progressInterval);
-            progressBarFill.style.width = '100%';
-            progressText.textContent = '100%';
-            
-            setTimeout(function() {
-                loading.style.display = 'none';
-                progressBarContainer.style.display = 'none';
-                progressBarFill.style.width = '0%';
-                progressText.textContent = '0%';
-                results.style.display = 'block';
+            if (!response.data.success) {
+                throw new Error(response.data.error || 'Failed to start scan.');
+            }
 
-                const data = response.data;
-                container.querySelector('.used-count').textContent = data.usedCount;
-                container.querySelector('.unused-count').textContent = data.unusedCount;
+            var scanId = response.data.scanId;
 
-                unusedAssets = data.unusedAssets || [];
-                selectedAssetIds = unusedAssets.map(function(a) { return a.id; });
+            // Show queue hint after 30s if still pending
+            queueHintTimer = setTimeout(function() {
+                // Only show if we haven't moved past pending
+                if (queueHint) queueHint.style.display = 'block';
+            }, 30000);
 
-                renderVolumesTables(container, unusedAssets, volumeNames);
+            // Poll for progress
+            pollTimer = setInterval(function() {
+                Craft.sendActionRequest('GET', 'asset-cleaner/asset-cleaner/scan-progress', {
+                    params: { scanId: scanId }
+                })
+                .then(function(pollResponse) {
+                    var d = pollResponse.data;
+                    if (!d.success) return;
 
-                // Count unique volumes in results
-                const uniqueVolumes = new Set();
-                unusedAssets.forEach(function(asset) {
-                    uniqueVolumes.add(asset.volumeId);
+                    // Hide queue hint once running
+                    if (d.status === 'running' && queueHint) {
+                        queueHint.style.display = 'none';
+                        if (queueHintTimer) clearTimeout(queueHintTimer);
+                    }
+
+                    // Update progress bar
+                    if (d.status === 'running' || d.status === 'complete') {
+                        progressBarFill.style.width = d.progress + '%';
+                        if (d.totalAssets > 0) {
+                            progressText.textContent = d.progress + '% (' + d.processedAssets + '/' + d.totalAssets + ' assets)';
+                        } else {
+                            progressText.textContent = d.progress + '%';
+                        }
+                        loadingText.textContent = 'Scanning...';
+                    }
+
+                    // Complete
+                    if (d.status === 'complete') {
+                        clearInterval(pollTimer);
+                        if (queueHintTimer) clearTimeout(queueHintTimer);
+                        progressBarFill.style.width = '100%';
+                        progressText.textContent = '100%';
+
+                        // Fetch full results
+                        Craft.sendActionRequest('GET', 'asset-cleaner/asset-cleaner/scan-results', {
+                            params: { scanId: scanId }
+                        })
+                        .then(function(resultsResponse) {
+                            var data = resultsResponse.data;
+                            if (!data.success) {
+                                throw new Error(data.error || 'Failed to load results.');
+                            }
+
+                            loading.style.display = 'none';
+                            progressBarContainer.style.display = 'none';
+                            if (queueHint) queueHint.style.display = 'none';
+                            scanBtn.disabled = false;
+
+                            results.style.display = 'block';
+                            container.querySelector('.used-count').textContent = data.usedCount;
+                            container.querySelector('.unused-count').textContent = data.unusedCount;
+
+                            unusedAssets = data.unusedAssets || [];
+                            selectedAssetIds = unusedAssets.map(function(a) { return a.id; });
+
+                            renderVolumesTables(container, unusedAssets, volumeNames);
+
+                            var uniqueVolumes = new Set();
+                            unusedAssets.forEach(function(asset) {
+                                uniqueVolumes.add(asset.volumeId);
+                            });
+                            var volumeCount = uniqueVolumes.size;
+
+                            var actions = container.querySelector('.asset-cleaner-actions');
+                            var separator = container.querySelector('.asset-cleaner-separator');
+
+                            if (unusedAssets.length > 0 && volumeCount > 1) {
+                                actions.style.display = 'block';
+                                separator.style.display = 'block';
+                            } else {
+                                actions.style.display = 'none';
+                                separator.style.display = 'none';
+                            }
+
+                            // Show scan timestamp
+                            showScanTime(container, new Date().toISOString());
+                        })
+                        .catch(function() {
+                            loading.style.display = 'none';
+                            scanBtn.disabled = false;
+                            Craft.cp.displayError(t.error || 'An error occurred.');
+                        });
+                    }
+
+                    // Failed
+                    if (d.status === 'failed') {
+                        clearInterval(pollTimer);
+                        if (queueHintTimer) clearTimeout(queueHintTimer);
+                        loading.style.display = 'none';
+                        progressBarContainer.style.display = 'none';
+                        if (queueHint) queueHint.style.display = 'none';
+                        scanBtn.disabled = false;
+                        Craft.cp.displayError(d.error || 'Scan failed.');
+                    }
+                })
+                .catch(function() {
+                    // Polling error — keep trying silently
                 });
-                const volumeCount = uniqueVolumes.size;
-
-                // Show/hide global actions based on volume count and unused assets
-                const actions = container.querySelector('.asset-cleaner-actions');
-                const separator = container.querySelector('.asset-cleaner-separator');
-                
-                if (unusedAssets.length > 0 && volumeCount > 1) {
-                    // Multiple volumes: show global actions and separator
-                    actions.style.display = 'block';
-                    separator.style.display = 'block';
-                } else {
-                    // Single volume or no assets: hide global actions
-                    actions.style.display = 'none';
-                    separator.style.display = 'none';
-                }
-            }, 300);
+            }, 1500);
         })
         .catch(function(error) {
-            clearInterval(progressInterval);
             loading.style.display = 'none';
             progressBarContainer.style.display = 'none';
+            if (queueHint) queueHint.style.display = 'none';
+            scanBtn.disabled = false;
             Craft.cp.displayError(t.error || 'An error occurred.');
         });
     }

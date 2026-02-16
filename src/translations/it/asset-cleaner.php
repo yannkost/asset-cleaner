@@ -73,4 +73,14 @@ return [
     'Failed to move assets to trash.' => 'Spostamento asset nel cestino fallito.',
     'Failed to delete assets.' => 'Eliminazione asset fallita.',
     'Failed to get asset usage.' => 'Recupero utilizzo asset fallito.',
+
+    // Queue Scan
+    'Scan queued...' => 'Scansione in coda...',
+    'Scan failed.' => 'Scansione fallita.',
+    'Scanning assets for usage' => 'Scansione degli asset in uso',
+    'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => 'La coda non sembra essere in esecuzione. Assicurarsi che un worker della coda sia attivo (es: php craft queue/listen).',
+
+    // Scan Time
+    'Scanned on {date}' => 'Scansionato il {date}',
+    'Restoring last scan...' => 'Ripristino dell\'ultima scansione...',
 ];

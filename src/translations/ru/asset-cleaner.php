@@ -73,4 +73,14 @@ return [
     'Failed to move assets to trash.' => 'Не удалось переместить ресурсы в корзину.',
     'Failed to delete assets.' => 'Не удалось удалить ресурсы.',
     'Failed to get asset usage.' => 'Не удалось получить информацию об использовании ресурса.',
+
+    // Queue Scan
+    'Scan queued...' => 'Сканирование в очереди...',
+    'Scan failed.' => 'Сканирование не удалось.',
+    'Scanning assets for usage' => 'Сканирование использования ресурсов',
+    'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => 'Очередь, похоже, не запущена. Убедитесь, что worker очереди активен (например, php craft queue/listen).',
+
+    // Scan Time
+    'Scanned on {date}' => 'Сканирование выполнено {date}',
+    'Restoring last scan...' => 'Восстановление последнего сканирования...',
 ];

@@ -9,6 +9,7 @@ use craft\elements\Asset;
 use craft\helpers\FileHelper;
 use craft\web\Controller;
 use yann\assetcleaner\helpers\Logger;
+use yann\assetcleaner\jobs\ScanSetupJob;
 use yann\assetcleaner\Plugin;
 use yii\web\Response;
 use ZipArchive;
@@ -41,7 +42,7 @@ class AssetCleanerController extends Controller
     }
 
     /**
-     * Start scan - returns unused/used counts
+     * Start scan — queues a background job and returns the scan ID
      *
      * @return Response
      */
@@ -59,25 +60,98 @@ class AssetCleanerController extends Controller
 
             $volumeIds = array_map('intval', $volumeIds);
 
-            $service = Plugin::getInstance()->assetUsage;
+            // Generate a unique scan ID
+            $scanId = uniqid('scan_', true);
 
-            $unusedCount = $service->countUnusedAssets($volumeIds);
-            $usedCount = $service->countUsedAssets($volumeIds);
-            $unusedAssets = $service->getUnusedAssets($volumeIds);
+            // Write initial progress to cache
+            $cache = Craft::$app->getCache();
+            $cache->set("asset-cleaner-progress-{$scanId}", [
+                'status' => 'pending',
+                'progress' => 0,
+                'totalAssets' => 0,
+                'processedAssets' => 0,
+                'usedCount' => 0,
+                'unusedCount' => 0,
+                'error' => null,
+            ], 3600);
+
+            // Push the setup job to the queue
+            Craft::$app->getQueue()->push(new ScanSetupJob([
+                'scanId' => $scanId,
+                'volumeIds' => $volumeIds,
+            ]));
 
             return $this->asJson([
                 'success' => true,
-                'usedCount' => $usedCount,
-                'unusedCount' => $unusedCount,
-                'unusedAssets' => $unusedAssets,
+                'scanId' => $scanId,
             ]);
         } catch (\Throwable $e) {
-            Logger::exception('Failed to scan volumes', $e);
+            Logger::exception('Failed to start scan', $e);
             return $this->asJson([
                 'success' => false,
                 'error' => Craft::t('asset-cleaner', 'Failed to scan volumes.'),
             ]);
         }
+    }
+
+    /**
+     * Poll scan progress
+     *
+     * @return Response
+     */
+    public function actionScanProgress(): Response
+    {
+        $this->requireAcceptsJson();
+
+        $scanId = Craft::$app->getRequest()->getQueryParam('scanId', '');
+        if (!$scanId) {
+            return $this->asJson(['success' => false, 'error' => 'Missing scanId.']);
+        }
+
+        $progress = Craft::$app->getCache()->get("asset-cleaner-progress-{$scanId}");
+        if ($progress === false) {
+            return $this->asJson(['success' => false, 'error' => 'Scan not found.']);
+        }
+
+        return $this->asJson([
+            'success' => true,
+            'status' => $progress['status'],
+            'progress' => (int)$progress['progress'],
+            'totalAssets' => (int)$progress['totalAssets'],
+            'processedAssets' => (int)$progress['processedAssets'],
+            'usedCount' => (int)$progress['usedCount'],
+            'unusedCount' => (int)$progress['unusedCount'],
+            'error' => $progress['error'],
+        ]);
+    }
+
+    /**
+     * Get full results from a completed scan
+     *
+     * @return Response
+     */
+    public function actionScanResults(): Response
+    {
+        $this->requireAcceptsJson();
+
+        $scanId = Craft::$app->getRequest()->getQueryParam('scanId', '');
+        if (!$scanId) {
+            return $this->asJson(['success' => false, 'error' => 'Missing scanId.']);
+        }
+
+        $progress = Craft::$app->getCache()->get("asset-cleaner-progress-{$scanId}");
+        if (!$progress || $progress['status'] !== 'complete') {
+            return $this->asJson(['success' => false, 'error' => 'Scan not complete.']);
+        }
+
+        $unusedAssets = Craft::$app->getCache()->get("asset-cleaner-results-{$scanId}") ?: [];
+
+        return $this->asJson([
+            'success' => true,
+            'usedCount' => (int)$progress['usedCount'],
+            'unusedCount' => (int)$progress['unusedCount'],
+            'unusedAssets' => $unusedAssets,
+        ]);
     }
 
     /**

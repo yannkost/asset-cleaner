@@ -73,4 +73,14 @@ return [
     'Failed to move assets to trash.' => 'Falha ao mover assets para a lixeira.',
     'Failed to delete assets.' => 'Falha ao excluir assets.',
     'Failed to get asset usage.' => 'Falha ao obter uso do asset.',
+
+    // Queue Scan
+    'Scan queued...' => 'Verificação em fila...',
+    'Scan failed.' => 'A verificação falhou.',
+    'Scanning assets for usage' => 'Verificando uso dos assets',
+    'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => 'A fila não parece estar em execução. Certifique-se de que um worker de fila esteja ativo (ex: php craft queue/listen).',
+
+    // Scan Time
+    'Scanned on {date}' => 'Escaneado em {date}',
+    'Restoring last scan...' => 'Restaurando último scan...',
 ];

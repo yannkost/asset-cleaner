@@ -73,4 +73,14 @@ return [
     'Failed to move assets to trash.' => 'アセットをゴミ箱に移動できませんでした。',
     'Failed to delete assets.' => 'アセットの削除に失敗しました。',
     'Failed to get asset usage.' => 'アセットの使用状況を取得できませんでした。',
+
+    // Queue Scan
+    'Scan queued...' => 'スキューに追加済み...',
+    'Scan failed.' => 'スキャンに失敗しました。',
+    'Scanning assets for usage' => 'アセットの使用状況をスキャン中',
+    'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => 'キューが実行されていないようです。キューワーカーが有効であることを確認してください（例：php craft queue/listen）。',
+
+    // Scan Time
+    'Scanned on {date}' => '{date} にスキャン済み',
+    'Restoring last scan...' => '前回のスキャンを復元中...',
 ];

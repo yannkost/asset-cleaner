@@ -73,4 +73,14 @@ return [
     'Failed to move assets to trash.' => 'Přesun souborů do koše selhal.',
     'Failed to delete assets.' => 'Smazání souborů selhalo.',
     'Failed to get asset usage.' => 'Získání informací o použití souboru selhalo.',
+
+    // Queue Scan
+    'Scan queued...' => 'Skenování ve frontě...',
+    'Scan failed.' => 'Skenování selhalo.',
+    'Scanning assets for usage' => 'Skenování využití souborů',
+    'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => 'Fronta zřejmě neběží. Ujistěte se, že je worker fronty aktivní (např. php craft queue/listen).',
+
+    // Scan Time
+    'Scanned on {date}' => 'Naskenováno {date}',
+    'Restoring last scan...' => 'Obnovování posledního skenu...',
 ];
