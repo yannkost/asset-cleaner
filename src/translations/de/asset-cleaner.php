@@ -24,6 +24,7 @@ return [
     // Bulk Actions
     'Bulk Actions' => 'Massenaktionen',
     'Bulk Actions (All Volumes)' => 'Massenaktionen (Alle Volumes)',
+    'Bulk Actions - All Selected Volumes' => 'Massenaktionen – Alle ausgewählten Volumes',
     'Download CSV' => 'CSV herunterladen',
     'Download ZIP' => 'ZIP herunterladen',
     'Put into Trash' => 'In den Papierkorb verschieben',
@@ -61,9 +62,13 @@ return [
     'We strongly recommend downloading the unused assets as a backup before proceeding.' => 'Wir empfehlen dringend, die ungenutzten Assets als Backup herunterzuladen, bevor Sie fortfahren.',
     'Are you absolutely sure you want to permanently delete these assets?' => 'Sind Sie absolut sicher, dass Sie diese Assets endgültig löschen möchten?',
     'Final confirmation: Permanently delete assets? This CANNOT be undone!' => 'Letzte Bestätigung: Assets endgültig löschen? Dies kann NICHT rückgängig gemacht werden!',
+    'Are you sure you want to permanently delete {count} assets? This action CANNOT be undone! Download a backup (CSV or ZIP) before proceeding.' => 'Möchten Sie wirklich {count} Assets endgültig löschen? Diese Aktion kann NICHT rückgängig gemacht werden! Bitte laden Sie zuerst ein Backup herunter (CSV oder ZIP).',
+    'Final confirmation: Permanently delete {count} assets? This CANNOT be undone!' => 'Letzte Bestätigung: {count} Assets endgültig löschen? Dies kann NICHT rückgängig gemacht werden!',
     
     // Volume Section
     'unused assets' => 'ungenutzte Assets',
+    '{count} unused assets — {size}' => '{count} ungenutzte Assets — {size}',
+    'No unused assets found.' => 'Keine ungenutzten Assets gefunden.',
     'No assets selected in this volume.' => 'Keine Assets in diesem Volume ausgewählt.',
     
     // Errors

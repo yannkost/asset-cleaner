@@ -133,6 +133,7 @@ class Plugin extends BasePlugin
 
                     $jsSettings = [
                         'translations' => [
+                            // View Usage popover
                             'viewUsage' => Craft::t('asset-cleaner', 'View Usage'),
                             'usedByEntries' => Craft::t('asset-cleaner', 'Used by Entries'),
                             'usedInContentFields' => Craft::t('asset-cleaner', 'Used in Content Fields'),
@@ -141,6 +142,39 @@ class Plugin extends BasePlugin
                             'error' => Craft::t('asset-cleaner', 'An error occurred.'),
                             'scannedOn' => Craft::t('asset-cleaner', 'Scanned on {date}'),
                             'restoringLastScan' => Craft::t('asset-cleaner', 'Restoring last scan...'),
+                            // Scanning
+                            'scanQueued' => Craft::t('asset-cleaner', 'Scan queued...'),
+                            'scanning' => Craft::t('asset-cleaner', 'Scanning...'),
+                            'scanFailed' => Craft::t('asset-cleaner', 'Scan failed.'),
+                            // Results & grid
+                            'noUnusedAssetsFound' => Craft::t('asset-cleaner', 'No unused assets found.'),
+                            'volumeHeader' => Craft::t('asset-cleaner', '{count} unused assets — {size}'),
+                            'selectAll' => Craft::t('asset-cleaner', 'Select All'),
+                            'colTitle' => Craft::t('asset-cleaner', 'Title'),
+                            'colFilename' => Craft::t('asset-cleaner', 'Filename'),
+                            'colSize' => Craft::t('asset-cleaner', 'Size'),
+                            'colPath' => Craft::t('asset-cleaner', 'Path'),
+                            // Action buttons
+                            'downloadCsv' => Craft::t('asset-cleaner', 'Download CSV'),
+                            'downloadZip' => Craft::t('asset-cleaner', 'Download ZIP'),
+                            'putIntoTrash' => Craft::t('asset-cleaner', 'Put into Trash'),
+                            'deletePermanently' => Craft::t('asset-cleaner', 'Delete Permanently'),
+                            // Action messages
+                            'noAssetsSelected' => Craft::t('asset-cleaner', 'No assets selected.'),
+                            'noAssetsSelectedInVolume' => Craft::t('asset-cleaner', 'No assets selected in this volume.'),
+                            'confirmTrash' => Craft::t('asset-cleaner', 'Are you sure you want to move {count} assets to trash?'),
+                            'movedToTrash' => Craft::t('asset-cleaner', 'Moved {count} assets to trash.'),
+                            'permanentlyDeleted' => Craft::t('asset-cleaner', 'Permanently deleted {count} assets.'),
+                            'deleteWarning' => Craft::t('asset-cleaner', 'Are you sure you want to permanently delete {count} assets? This action CANNOT be undone! Download a backup (CSV or ZIP) before proceeding.'),
+                            'deleteConfirm' => Craft::t('asset-cleaner', 'Final confirmation: Permanently delete {count} assets? This CANNOT be undone!'),
+                            // ZIP dialog
+                            'zipDialogTitle' => Craft::t('asset-cleaner', 'ZIP Download Options'),
+                            'zipDialogText' => Craft::t('asset-cleaner', 'How would you like to organize the files in the ZIP?'),
+                            'zipFlat' => Craft::t('asset-cleaner', 'Flat (all files in root)'),
+                            'zipFolders' => Craft::t('asset-cleaner', 'Preserve folder structure'),
+                            'cancel' => Craft::t('asset-cleaner', 'Cancel'),
+                            'zipInitiated' => Craft::t('asset-cleaner', 'ZIP download initiated. Large files may take several minutes to prepare.'),
+                            'zipPreparing' => Craft::t('asset-cleaner', 'Preparing ZIP file... This may take several minutes for large files. Please wait.'),
                         ],
                     ];
 

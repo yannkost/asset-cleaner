@@ -245,6 +245,7 @@ class ScanBatchJob extends BaseJob
                 'volumeId' => $asset->volumeId,
                 'size' => $asset->size,
                 'path' => $path,
+                'kind' => $asset->kind,
             ];
         }
 
