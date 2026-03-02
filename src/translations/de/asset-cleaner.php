@@ -38,6 +38,11 @@ return [
     'Path' => 'Pfad',
     'Date Created' => 'Erstellungsdatum',
     
+    // Results warning
+    'Before permanently deleting' => 'Vor dem endgültigen Löschen',
+    'We recommend downloading a ZIP backup of the assets you plan to remove first, or using "Put into Trash" as a safer alternative. Permanent deletions cannot be undone.' => 'Wir empfehlen, zuerst ein ZIP-Backup der zu entfernenden Assets herunterzuladen oder stattdessen "In den Papierkorb" zu verwenden. Endgültige Löschungen können nicht rückgängig gemacht werden.',
+    'Scan older than 24h — results may be outdated' => 'Scan älter als 24 Stunden — Ergebnisse könnten veraltet sein',
+
     // Messages
     'No assets selected.' => 'Keine Assets ausgewählt.',
     'No assets found.' => 'Keine Assets gefunden.',

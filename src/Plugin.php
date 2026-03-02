@@ -142,6 +142,7 @@ class Plugin extends BasePlugin
                             'error' => Craft::t('asset-cleaner', 'An error occurred.'),
                             'scannedOn' => Craft::t('asset-cleaner', 'Scanned on {date}'),
                             'restoringLastScan' => Craft::t('asset-cleaner', 'Restoring last scan...'),
+                            'scanStale' => Craft::t('asset-cleaner', 'Scan older than 24h — results may be outdated'),
                             // Scanning
                             'scanQueued' => Craft::t('asset-cleaner', 'Scan queued...'),
                             'scanning' => Craft::t('asset-cleaner', 'Scanning...'),

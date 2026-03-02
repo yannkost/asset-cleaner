@@ -38,6 +38,11 @@ return [
     'Path' => 'Path',
     'Date Created' => 'Date Created',
     
+    // Results warning
+    'Before permanently deleting' => 'Before permanently deleting',
+    'We recommend downloading a ZIP backup of the assets you plan to remove first, or using "Put into Trash" as a safer alternative. Permanent deletions cannot be undone.' => 'We recommend downloading a ZIP backup of the assets you plan to remove first, or using "Put into Trash" as a safer alternative. Permanent deletions cannot be undone.',
+    'Scan older than 24h — results may be outdated' => 'Scan older than 24h — results may be outdated',
+
     // Messages
     'No assets selected.' => 'No assets selected.',
     'No assets found.' => 'No assets found.',

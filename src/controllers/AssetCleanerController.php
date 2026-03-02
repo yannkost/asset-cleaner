@@ -175,6 +175,7 @@ class AssetCleanerController extends Controller
             // Use cached scan results when available — avoids re-running the full
             // synchronous scan, which times out for large datasets on S3 volumes.
             $unusedAssets = null;
+            $scanCompletedAt = null;
             if ($scanId) {
                 $cache = Craft::$app->getCache();
                 $progress = $cache->get("asset-cleaner-progress-{$scanId}");
@@ -182,6 +183,7 @@ class AssetCleanerController extends Controller
 
                 if ($progress && ($progress['status'] ?? '') === 'complete' && is_array($cachedResults)) {
                     $unusedAssets = $cachedResults;
+                    $scanCompletedAt = !empty($progress['completedAt']) ? (int)$progress['completedAt'] : null;
 
                     // Filter by the requested volumes
                     if (!empty($volumeIds)) {
@@ -230,7 +232,8 @@ class AssetCleanerController extends Controller
                 }
             }
 
-            $filename .= '_' . date('Y-m-d_H-i-s') . '.csv';
+            // Use the actual scan datetime when available, otherwise fall back to now
+            $filename .= '_' . ($scanCompletedAt ? date('Y-m-d_H-i-s', $scanCompletedAt) : date('Y-m-d_H-i-s')) . '.csv';
 
             $response = Craft::$app->getResponse();
             $response->format = Response::FORMAT_RAW;

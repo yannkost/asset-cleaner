@@ -235,8 +235,9 @@
     }
 
     function showScanTime(container, isoTime) {
+        var meta = container.querySelector('.asset-cleaner-scan-meta');
         var el = container.querySelector('.asset-cleaner-scan-time');
-        if (!el || !isoTime) return;
+        if (!meta || !el || !isoTime) return;
 
         var date = new Date(isoTime);
         var formatted = date.toLocaleDateString(undefined, {
@@ -250,7 +251,21 @@
 
         var template = t.scannedOn || 'Scanned on {date}';
         el.textContent = template.replace('{date}', formatted);
-        el.style.display = 'inline';
+
+        // Remove any previous stale badge
+        var oldBadge = meta.querySelector('.asset-cleaner-scan-stale');
+        if (oldBadge) oldBadge.remove();
+
+        // Add stale badge if scan is older than 24 hours
+        var ageHours = (Date.now() - date.getTime()) / (1000 * 60 * 60);
+        if (ageHours > 24) {
+            var badge = document.createElement('span');
+            badge.className = 'asset-cleaner-scan-stale';
+            badge.textContent = t.scanStale || 'Scan older than 24h — results may be outdated';
+            meta.appendChild(badge);
+        }
+
+        meta.style.display = 'flex';
     }
 
     function handleScan() {
