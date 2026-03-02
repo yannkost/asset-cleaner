@@ -254,6 +254,20 @@ class ScanController extends Controller
     }
 
     /**
+     * Sanitize a string for use in filenames
+     *
+     * @param string $string
+     * @return string
+     */
+    private function sanitizeFilename(string $string): string
+    {
+        $string = strtolower($string);
+        $string = preg_replace('/[^a-z0-9]+/', '_', $string);
+        $string = trim($string, '_');
+        return $string;
+    }
+
+    /**
      * Format bytes to human readable
      *
      * @param int $bytes
