@@ -120,10 +120,19 @@ class ScanController extends Controller
             return ExitCode::OK;
         }
 
-        $filename = 'unused-assets-' . date('Y-m-d-His') . '.csv';
+        $filename = 'unused-assets';
+
+        if (!empty($this->volumes)) {
+            $handles = array_filter(array_map([$this, 'sanitizeFilename'], array_map('trim', explode(',', $this->volumes))));
+            if (!empty($handles)) {
+                $filename .= '_' . implode('__', $handles);
+            }
+        }
+
+        $filename .= '_' . date('Y-m-d_H-i-s') . '.csv';
         $filepath = Craft::getAlias('@storage') . '/' . $filename;
 
-        $csv = "ID,Title,Filename,Volume,Size,Date Created,URL\n";
+        $csv = "ID,Title,Filename,Volume,Size,Path,URL\n";
 
         foreach ($unusedAssets as $asset) {
             $csv .= sprintf(
@@ -133,7 +142,7 @@ class ScanController extends Controller
                 '"' . str_replace('"', '""', $asset['filename']) . '"',
                 '"' . str_replace('"', '""', $asset['volume']) . '"',
                 $asset['size'],
-                $asset['dateCreated'],
+                '"' . str_replace('"', '""', $asset['path'] ?? '') . '"',
                 '"' . str_replace('"', '""', $asset['url'] ?? '') . '"'
             );
         }
@@ -242,6 +251,20 @@ class ScanController extends Controller
         }
 
         return $volumeIds;
+    }
+
+    /**
+     * Sanitize a string for use in filenames
+     *
+     * @param string $string
+     * @return string
+     */
+    private function sanitizeFilename(string $string): string
+    {
+        $string = strtolower($string);
+        $string = preg_replace('/[^a-z0-9]+/', '_', $string);
+        $string = trim($string, '_');
+        return $string;
     }
 
     /**

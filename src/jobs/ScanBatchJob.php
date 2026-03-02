@@ -153,13 +153,14 @@ class ScanBatchJob extends BaseJob
         // Store results
         $cache->set("asset-cleaner-results-{$this->scanId}", $unusedAssets, 3600);
 
-        // Mark complete
+        // Mark complete (completedAt is used by the CSV export to stamp the filename)
         $this->updateProgress($cache, [
             'status' => 'complete',
             'progress' => 100,
             'processedAssets' => count($this->allAssetIds),
             'usedCount' => $usedCount,
             'unusedCount' => count($unusedIds),
+            'completedAt' => time(),
         ]);
 
         // Store last-scan metadata for auto-restore on page load
@@ -245,6 +246,7 @@ class ScanBatchJob extends BaseJob
                 'volumeId' => $asset->volumeId,
                 'size' => $asset->size,
                 'path' => $path,
+                'kind' => $asset->kind,
             ];
         }
 

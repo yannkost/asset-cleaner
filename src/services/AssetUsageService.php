@@ -324,6 +324,7 @@ class AssetUsageService extends Component
                 'volumeId' => $asset->volumeId,
                 'size' => $asset->size,
                 'path' => $path,
+                'kind' => $asset->kind,
             ];
         }
 

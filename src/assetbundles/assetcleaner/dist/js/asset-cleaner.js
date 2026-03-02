@@ -7,6 +7,8 @@
     // State
     let selectedAssetIds = [];
     let unusedAssets = [];
+    let activeScanId = settings.lastScanId || null;
+    let tooltipTimer = null;
 
     // Initialize when DOM is ready
     if (document.readyState === 'loading') {
@@ -65,7 +67,7 @@
         .then(function(response) {
             renderUsagePopover(popover, response.data);
         })
-        .catch(function(error) {
+        .catch(function() {
             popover.innerHTML = '<p class="error">' + (t.error || 'An error occurred.') + '</p>';
         });
 
@@ -173,7 +175,6 @@
         var results = container.querySelector('.asset-cleaner-results');
         var loadingText = loading.querySelector('.loading-text');
 
-        // Show a brief loading state
         loading.style.display = 'flex';
         loadingText.textContent = t.restoringLastScan || 'Restoring last scan...';
 
@@ -189,6 +190,7 @@
             }
 
             try {
+                activeScanId = scanId;
                 results.style.display = 'block';
                 container.querySelector('.used-count').textContent = data.usedCount;
                 container.querySelector('.unused-count').textContent = data.unusedCount;
@@ -196,7 +198,6 @@
                 unusedAssets = data.unusedAssets || [];
                 selectedAssetIds = unusedAssets.map(function(a) { return a.id; });
 
-                // Build volumeNames from the assets themselves
                 var volumeNames = {};
                 unusedAssets.forEach(function(asset) {
                     if (asset.volumeId && asset.volume) {
@@ -223,7 +224,6 @@
                     separator.style.display = 'none';
                 }
 
-                // Show scan timestamp
                 showScanTime(container, scanTime);
             } catch (e) {
                 // Don't freeze the UI if rendering fails
@@ -235,8 +235,9 @@
     }
 
     function showScanTime(container, isoTime) {
+        var meta = container.querySelector('.asset-cleaner-scan-meta');
         var el = container.querySelector('.asset-cleaner-scan-time');
-        if (!el || !isoTime) return;
+        if (!meta || !el || !isoTime) return;
 
         var date = new Date(isoTime);
         var formatted = date.toLocaleDateString(undefined, {
@@ -250,19 +251,21 @@
 
         var template = t.scannedOn || 'Scanned on {date}';
         el.textContent = template.replace('{date}', formatted);
-        el.style.display = 'inline';
-    }
 
-    function debounce(func, wait) {
-        let timeout;
-        return function executedFunction() {
-            const context = this;
-            const args = arguments;
-            clearTimeout(timeout);
-            timeout = setTimeout(function() {
-                func.apply(context, args);
-            }, wait);
-        };
+        // Remove any previous stale badge
+        var oldBadge = meta.querySelector('.asset-cleaner-scan-stale');
+        if (oldBadge) oldBadge.remove();
+
+        // Add stale badge if scan is older than 24 hours
+        var ageHours = (Date.now() - date.getTime()) / (1000 * 60 * 60);
+        if (ageHours > 24) {
+            var badge = document.createElement('span');
+            badge.className = 'asset-cleaner-scan-stale';
+            badge.textContent = t.scanStale || 'Scan older than 24h — results may be outdated';
+            meta.appendChild(badge);
+        }
+
+        meta.style.display = 'flex';
     }
 
     function handleScan() {
@@ -285,21 +288,18 @@
             volumeNames[cb.value] = label ? label.textContent.trim() : 'Volume ' + cb.value;
         });
 
-        // Disable scan button to prevent double-clicks
         scanBtn.disabled = true;
 
-        // Show loading with progress bar
         loading.style.display = 'flex';
         progressBarContainer.style.display = 'block';
         results.style.display = 'none';
         if (queueHint) queueHint.style.display = 'none';
         progressBarFill.style.width = '0%';
         progressText.textContent = '0%';
-        loadingText.textContent = 'Scan queued...';
+        loadingText.textContent = t.scanQueued || 'Scan queued...';
 
         var pollTimer = null;
         var queueHintTimer = null;
-        var scanStartTime = Date.now();
 
         Craft.sendActionRequest('POST', 'asset-cleaner/asset-cleaner/start-scan', {
             data: { volumeIds: volumeIds }
@@ -313,7 +313,6 @@
 
             // Show queue hint after 30s if still pending
             queueHintTimer = setTimeout(function() {
-                // Only show if we haven't moved past pending
                 if (queueHint) queueHint.style.display = 'block';
             }, 30000);
 
@@ -340,7 +339,7 @@
                         } else {
                             progressText.textContent = d.progress + '%';
                         }
-                        loadingText.textContent = 'Scanning...';
+                        loadingText.textContent = t.scanning || 'Scanning...';
                     }
 
                     // Complete
@@ -365,6 +364,7 @@
                             if (queueHint) queueHint.style.display = 'none';
                             scanBtn.disabled = false;
 
+                            activeScanId = scanId;
                             results.style.display = 'block';
                             container.querySelector('.used-count').textContent = data.usedCount;
                             container.querySelector('.unused-count').textContent = data.unusedCount;
@@ -391,7 +391,6 @@
                                 separator.style.display = 'none';
                             }
 
-                            // Show scan timestamp
                             showScanTime(container, new Date().toISOString());
                         })
                         .catch(function() {
@@ -409,7 +408,7 @@
                         progressBarContainer.style.display = 'none';
                         if (queueHint) queueHint.style.display = 'none';
                         scanBtn.disabled = false;
-                        Craft.cp.displayError(d.error || 'Scan failed.');
+                        Craft.cp.displayError(d.error || t.scanFailed || 'Scan failed.');
                     }
                 })
                 .catch(function() {
@@ -417,7 +416,7 @@
                 });
             }, 1500);
         })
-        .catch(function(error) {
+        .catch(function() {
             loading.style.display = 'none';
             progressBarContainer.style.display = 'none';
             if (queueHint) queueHint.style.display = 'none';
@@ -431,7 +430,7 @@
         volumesContainer.innerHTML = '';
 
         if (assets.length === 0) {
-            volumesContainer.innerHTML = '<div style="text-align:center; padding:24px; color:var(--gray-500);">No unused assets found.</div>';
+            volumesContainer.innerHTML = '<div style="text-align:center; padding:24px; color:var(--gray-500);">' + (t.noUnusedAssetsFound || 'No unused assets found.') + '</div>';
             return;
         }
 
@@ -450,33 +449,35 @@
         volumeKeys.forEach(function(volumeId, index) {
             const volumeAssets = assetsByVolume[volumeId];
             const volumeName = volumeNames[volumeId] || volumeAssets[0].volume || 'Unknown Volume';
-            
-            // Calculate total size for this volume
+
             const totalVolumeSize = volumeAssets.reduce(function(sum, asset) {
                 return sum + (asset.size || 0);
             }, 0);
-            
+
             const volumeSection = document.createElement('div');
             volumeSection.className = 'asset-cleaner-volume-section';
-            
+
             const header = document.createElement('h3');
-            header.textContent = volumeName + ' (' + volumeAssets.length + ' unused assets — ' + formatBytes(totalVolumeSize) + ')';
+            var headerSummary = (t.volumeHeader || '{count} unused assets — {size}')
+                .replace('{count}', volumeAssets.length)
+                .replace('{size}', formatBytes(totalVolumeSize));
+            header.textContent = volumeName + ' (' + headerSummary + ')';
             volumeSection.appendChild(header);
 
             const selectAllWrapper = document.createElement('div');
             selectAllWrapper.className = 'select-all-wrapper';
-            selectAllWrapper.innerHTML = '<label><input type="checkbox" class="volume-select-all" data-volume-id="' + volumeId + '" checked> Select All</label>';
+            selectAllWrapper.innerHTML = '<label><input type="checkbox" class="volume-select-all" data-volume-id="' + volumeId + '" checked> ' + (t.selectAll || 'Select All') + '</label>';
             volumeSection.appendChild(selectAllWrapper);
 
             // Add per-volume action buttons
             const volumeActions = document.createElement('div');
             volumeActions.className = 'asset-cleaner-volume-actions';
-            volumeActions.innerHTML = 
+            volumeActions.innerHTML =
                 '<div class="buttons">' +
-                    '<button type="button" class="btn btn-sm volume-csv-btn" data-volume-id="' + volumeId + '">Download CSV</button>' +
-                    '<button type="button" class="btn btn-sm volume-zip-btn" data-volume-id="' + volumeId + '">Download ZIP</button>' +
-                    '<button type="button" class="btn btn-sm volume-trash-btn" data-volume-id="' + volumeId + '">Put into Trash</button>' +
-                    '<button type="button" class="btn btn-sm submit volume-delete-btn" data-volume-id="' + volumeId + '">Delete Permanently</button>' +
+                    '<button type="button" class="btn btn-sm volume-csv-btn" data-volume-id="' + volumeId + '">' + (t.downloadCsv || 'Download CSV') + '</button>' +
+                    '<button type="button" class="btn btn-sm volume-zip-btn" data-volume-id="' + volumeId + '">' + (t.downloadZip || 'Download ZIP') + '</button>' +
+                    '<button type="button" class="btn btn-sm volume-trash-btn" data-volume-id="' + volumeId + '">' + (t.putIntoTrash || 'Put into Trash') + '</button>' +
+                    '<button type="button" class="btn btn-sm submit volume-delete-btn" data-volume-id="' + volumeId + '">' + (t.deletePermanently || 'Delete Permanently') + '</button>' +
                 '</div>';
             volumeSection.appendChild(volumeActions);
 
@@ -486,12 +487,13 @@
 
             const gridHeader = document.createElement('div');
             gridHeader.className = 'asset-cleaner-grid-header';
-            gridHeader.innerHTML = 
+            gridHeader.innerHTML =
                 '<div class="grid-cell col-checkbox"></div>' +
-                '<div class="grid-cell col-title">Title</div>' +
-                '<div class="grid-cell col-filename">Filename</div>' +
-                '<div class="grid-cell col-size">Size</div>' +
-                '<div class="grid-cell col-path">Path</div>';
+                '<div class="grid-cell col-preview"></div>' +
+                '<div class="grid-cell col-title">' + (t.colTitle || 'Title') + '</div>' +
+                '<div class="grid-cell col-filename">' + (t.colFilename || 'Filename') + '</div>' +
+                '<div class="grid-cell col-size">' + (t.colSize || 'Size') + '</div>' +
+                '<div class="grid-cell col-path">' + (t.colPath || 'Path') + '</div>';
             grid.appendChild(gridHeader);
 
             const gridBody = document.createElement('div');
@@ -501,33 +503,53 @@
                 const row = document.createElement('div');
                 row.className = 'asset-cleaner-grid-row';
                 row.dataset.assetId = asset.id;
-                row.innerHTML = 
+
+                var previewCell;
+                if (asset.kind === 'image' && asset.url) {
+                    previewCell = '<div class="grid-cell col-preview"><img class="asset-thumb" src="' + escapeHtml(asset.url) + '" alt="" loading="lazy" /></div>';
+                } else {
+                    previewCell = '<div class="grid-cell col-preview"><span class="asset-kind-badge">' + escapeHtml(asset.kind || '') + '</span></div>';
+                }
+
+                row.innerHTML =
                     '<div class="grid-cell col-checkbox"><input type="checkbox" class="asset-checkbox" value="' + asset.id + '" checked></div>' +
+                    previewCell +
                     '<div class="grid-cell col-title" title="' + escapeHtml(asset.title) + '"><a href="' + escapeHtml(asset.cpUrl) + '" target="_blank">' + escapeHtml(asset.title) + '</a></div>' +
                     '<div class="grid-cell col-filename" title="' + escapeHtml(asset.filename) + '">' + escapeHtml(asset.filename) + '</div>' +
                     '<div class="grid-cell col-size">' + formatBytes(asset.size) + '</div>' +
                     '<div class="grid-cell col-path" title="' + escapeHtml(asset.path) + '">' + escapeHtml(asset.path) + '</div>';
+
+                // Hover preview tooltip for image assets
+                if (asset.kind === 'image' && asset.url) {
+                    row.addEventListener('mouseenter', function(e) {
+                        showPreviewTooltip(asset, e);
+                    });
+                    row.addEventListener('mouseleave', function() {
+                        hidePreviewTooltip();
+                    });
+                }
+
                 gridBody.appendChild(row);
             });
 
             grid.appendChild(gridBody);
             volumeSection.appendChild(grid);
-            
-            // Add separator between volumes (except after the last one)
+
+            // Separator between volumes (except after the last one)
             if (index < volumeKeys.length - 1) {
                 const separator = document.createElement('hr');
                 separator.className = 'volume-separator';
                 volumeSection.appendChild(separator);
             }
-            
+
             volumesContainer.appendChild(volumeSection);
 
-            // Add change listeners for checkboxes
+            // Checkbox change listeners
             gridBody.querySelectorAll('.asset-checkbox').forEach(function(cb) {
                 cb.addEventListener('change', updateSelectedAssets);
             });
 
-            // Add select all listener for this volume
+            // Select-all listener for this volume
             const volumeSelectAll = selectAllWrapper.querySelector('.volume-select-all');
             volumeSelectAll.addEventListener('change', function(e) {
                 const checked = e.target.checked;
@@ -537,7 +559,7 @@
                 updateSelectedAssets();
             });
 
-            // Add per-volume action button listeners
+            // Per-volume action button listeners
             volumeActions.querySelector('.volume-csv-btn').addEventListener('click', function() {
                 handleVolumeExportCsv(volumeId);
             });
@@ -553,13 +575,52 @@
         });
     }
 
-    function handleSelectAll(e) {
-        const checked = e.target.checked;
-        const container = document.querySelector('.asset-cleaner-utility');
-        container.querySelectorAll('.asset-checkbox').forEach(function(cb) {
-            cb.checked = checked;
-        });
-        updateSelectedAssets();
+    // ========================================
+    // Preview Tooltip
+    // ========================================
+
+    function showPreviewTooltip(asset, e) {
+        clearTimeout(tooltipTimer);
+        tooltipTimer = setTimeout(function() {
+            hidePreviewTooltip();
+
+            var tooltip = document.createElement('div');
+            tooltip.id = 'asset-cleaner-preview-tooltip';
+
+            var html = '<div class="preview-image-wrapper">';
+            html += '<img src="' + escapeHtml(asset.url) + '" alt="" />';
+            html += '</div>';
+            html += '<div class="preview-meta">';
+            html += '<span class="preview-size">' + formatBytes(asset.size) + '</span>';
+            html += '</div>';
+
+            tooltip.innerHTML = html;
+            document.body.appendChild(tooltip);
+
+            // Position near cursor, keeping within viewport
+            var x = e.clientX + 16;
+            var y = e.clientY + 8;
+            var w = tooltip.offsetWidth;
+            var h = tooltip.offsetHeight;
+
+            if (x + w > window.innerWidth - 12) {
+                x = e.clientX - w - 16;
+            }
+            if (y + h > window.innerHeight - 12) {
+                y = e.clientY - h - 8;
+            }
+
+            tooltip.style.left = x + 'px';
+            tooltip.style.top = y + 'px';
+        }, 300);
+    }
+
+    function hidePreviewTooltip() {
+        clearTimeout(tooltipTimer);
+        var existing = document.getElementById('asset-cleaner-preview-tooltip');
+        if (existing) {
+            existing.remove();
+        }
     }
 
     function updateSelectedAssets() {
@@ -569,6 +630,10 @@
         });
     }
 
+    // ========================================
+    // CSV / ZIP Export
+    // ========================================
+
     function handleExportCsv() {
         const container = document.querySelector('.asset-cleaner-utility');
         const volumeIds = [];
@@ -576,7 +641,10 @@
             volumeIds.push(cb.value);
         });
 
-        // Create form and submit
+        submitCsvDownload(volumeIds, activeScanId);
+    }
+
+    function submitCsvDownload(volumeIds, scanId) {
         const form = document.createElement('form');
         form.method = 'POST';
         form.action = Craft.getActionUrl('asset-cleaner/asset-cleaner/export');
@@ -587,7 +655,16 @@
         csrfInput.value = Craft.csrfTokenValue;
         form.appendChild(csrfInput);
 
-        volumeIds.forEach(function(id) {
+        // Pass scanId so the server can use cached results instead of re-scanning
+        if (scanId) {
+            const scanIdInput = document.createElement('input');
+            scanIdInput.type = 'hidden';
+            scanIdInput.name = 'scanId';
+            scanIdInput.value = scanId;
+            form.appendChild(scanIdInput);
+        }
+
+        (volumeIds || []).forEach(function(id) {
             const input = document.createElement('input');
             input.type = 'hidden';
             input.name = 'volumeIds[]';
@@ -602,21 +679,18 @@
 
     function handleExportZip() {
         if (selectedAssetIds.length === 0) {
-            Craft.cp.displayError('No assets selected.');
+            Craft.cp.displayError(t.noAssetsSelected || 'No assets selected.');
             return;
         }
 
-        // Ask user about folder structure preference
         showFolderStructureDialog(function(preserveFolders) {
             submitZipDownload(selectedAssetIds, preserveFolders);
         });
     }
 
     function submitZipDownload(assetIds, preserveFolders) {
-        // Show loading overlay
-        showDownloadOverlay('Preparing ZIP file... This may take several minutes for large files. Please wait.');
+        showDownloadOverlay(t.zipPreparing || 'Preparing ZIP file... This may take several minutes for large files. Please wait.');
 
-        // Create form and submit directly (no iframe needed)
         const form = document.createElement('form');
         form.method = 'POST';
         form.action = Craft.getActionUrl('asset-cleaner/asset-cleaner/zip');
@@ -627,7 +701,6 @@
         csrfInput.value = Craft.csrfTokenValue;
         form.appendChild(csrfInput);
 
-        // Add preserveFolders parameter
         const preserveFoldersInput = document.createElement('input');
         preserveFoldersInput.type = 'hidden';
         preserveFoldersInput.name = 'preserveFolders';
@@ -642,26 +715,30 @@
             form.appendChild(input);
         });
 
-        // Show notification immediately before form submission
-        Craft.cp.displayNotice('ZIP download initiated. Large files may take several minutes to prepare.');
+        Craft.cp.displayNotice(t.zipInitiated || 'ZIP download initiated. Large files may take several minutes to prepare.');
 
         document.body.appendChild(form);
         form.submit();
         document.body.removeChild(form);
 
-        // Hide overlay after short delay
         setTimeout(function() {
             hideDownloadOverlay();
         }, 2000);
     }
 
+    // ========================================
+    // Trash / Delete
+    // ========================================
+
     function handleTrash() {
         if (selectedAssetIds.length === 0) {
-            Craft.cp.displayError('No assets selected.');
+            Craft.cp.displayError(t.noAssetsSelected || 'No assets selected.');
             return;
         }
 
-        if (!confirm('Are you sure you want to move ' + selectedAssetIds.length + ' assets to trash?')) {
+        var msg = (t.confirmTrash || 'Are you sure you want to move {count} assets to trash?')
+            .replace('{count}', selectedAssetIds.length);
+        if (!confirm(msg)) {
             return;
         }
 
@@ -671,37 +748,34 @@
         .then(function(response) {
             const data = response.data;
             if (data.success) {
-                Craft.cp.displayNotice('Moved ' + data.trashedCount + ' assets to trash.');
-                // Re-scan
+                var notice = (t.movedToTrash || 'Moved {count} assets to trash.')
+                    .replace('{count}', data.trashedCount);
+                Craft.cp.displayNotice(notice);
                 document.querySelector('.asset-cleaner-scan-btn').click();
             } else {
-                Craft.cp.displayError(data.error || 'An error occurred.');
+                Craft.cp.displayError(data.error || t.error || 'An error occurred.');
             }
         })
-        .catch(function(error) {
+        .catch(function() {
             Craft.cp.displayError(t.error || 'An error occurred.');
         });
     }
 
     function handleDeletePermanently() {
         if (selectedAssetIds.length === 0) {
-            Craft.cp.displayError('No assets selected.');
+            Craft.cp.displayError(t.noAssetsSelected || 'No assets selected.');
             return;
         }
 
-        const warningMessage = 
-            '⚠️ WARNING: You are about to permanently delete ' + selectedAssetIds.length + ' assets.\n\n' +
-            'This action CANNOT be undone!\n\n' +
-            'We strongly recommend downloading the unused assets as a backup before proceeding.\n\n' +
-            'Click "Download CSV" or "Download ZIP" to backup your assets first.\n\n' +
-            'Are you absolutely sure you want to permanently delete these assets?';
-
-        if (!confirm(warningMessage)) {
+        var warning = (t.deleteWarning || 'Are you sure you want to permanently delete {count} assets? This action CANNOT be undone! Download a backup (CSV or ZIP) before proceeding.')
+            .replace('{count}', selectedAssetIds.length);
+        if (!confirm(warning)) {
             return;
         }
 
-        // Double confirmation
-        if (!confirm('Final confirmation: Permanently delete ' + selectedAssetIds.length + ' assets? This CANNOT be undone!')) {
+        var confirm2 = (t.deleteConfirm || 'Final confirmation: Permanently delete {count} assets? This CANNOT be undone!')
+            .replace('{count}', selectedAssetIds.length);
+        if (!confirm(confirm2)) {
             return;
         }
 
@@ -711,14 +785,15 @@
         .then(function(response) {
             const data = response.data;
             if (data.success) {
-                Craft.cp.displayNotice('Permanently deleted ' + data.deletedCount + ' assets.');
-                // Re-scan
+                var notice = (t.permanentlyDeleted || 'Permanently deleted {count} assets.')
+                    .replace('{count}', data.deletedCount);
+                Craft.cp.displayNotice(notice);
                 document.querySelector('.asset-cleaner-scan-btn').click();
             } else {
-                Craft.cp.displayError(data.error || 'An error occurred.');
+                Craft.cp.displayError(data.error || t.error || 'An error occurred.');
             }
         })
-        .catch(function(error) {
+        .catch(function() {
             Craft.cp.displayError(t.error || 'An error occurred.');
         });
     }
@@ -739,39 +814,17 @@
     }
 
     function handleVolumeExportCsv(volumeId) {
-        const container = document.querySelector('.asset-cleaner-utility');
-        
-        // Create form and submit with only this volume
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.action = Craft.getActionUrl('asset-cleaner/asset-cleaner/export');
-
-        const csrfInput = document.createElement('input');
-        csrfInput.type = 'hidden';
-        csrfInput.name = Craft.csrfTokenName;
-        csrfInput.value = Craft.csrfTokenValue;
-        form.appendChild(csrfInput);
-
-        const volumeInput = document.createElement('input');
-        volumeInput.type = 'hidden';
-        volumeInput.name = 'volumeIds[]';
-        volumeInput.value = volumeId;
-        form.appendChild(volumeInput);
-
-        document.body.appendChild(form);
-        form.submit();
-        document.body.removeChild(form);
+        submitCsvDownload([volumeId], activeScanId);
     }
 
     function handleVolumeExportZip(volumeId) {
         const assetIds = getVolumeAssetIds(volumeId);
-        
+
         if (assetIds.length === 0) {
-            Craft.cp.displayError('No assets selected in this volume.');
+            Craft.cp.displayError(t.noAssetsSelectedInVolume || 'No assets selected in this volume.');
             return;
         }
 
-        // Ask user about folder structure preference
         showFolderStructureDialog(function(preserveFolders) {
             submitZipDownload(assetIds, preserveFolders);
         });
@@ -779,13 +832,15 @@
 
     function handleVolumeTrash(volumeId) {
         const assetIds = getVolumeAssetIds(volumeId);
-        
+
         if (assetIds.length === 0) {
-            Craft.cp.displayError('No assets selected in this volume.');
+            Craft.cp.displayError(t.noAssetsSelectedInVolume || 'No assets selected in this volume.');
             return;
         }
 
-        if (!confirm('Are you sure you want to move ' + assetIds.length + ' assets to trash?')) {
+        var msg = (t.confirmTrash || 'Are you sure you want to move {count} assets to trash?')
+            .replace('{count}', assetIds.length);
+        if (!confirm(msg)) {
             return;
         }
 
@@ -795,39 +850,36 @@
         .then(function(response) {
             const data = response.data;
             if (data.success) {
-                Craft.cp.displayNotice('Moved ' + data.trashedCount + ' assets to trash.');
-                // Re-scan
+                var notice = (t.movedToTrash || 'Moved {count} assets to trash.')
+                    .replace('{count}', data.trashedCount);
+                Craft.cp.displayNotice(notice);
                 document.querySelector('.asset-cleaner-scan-btn').click();
             } else {
-                Craft.cp.displayError(data.error || 'An error occurred.');
+                Craft.cp.displayError(data.error || t.error || 'An error occurred.');
             }
         })
-        .catch(function(error) {
+        .catch(function() {
             Craft.cp.displayError(t.error || 'An error occurred.');
         });
     }
 
     function handleVolumeDeletePermanently(volumeId) {
         const assetIds = getVolumeAssetIds(volumeId);
-        
+
         if (assetIds.length === 0) {
-            Craft.cp.displayError('No assets selected in this volume.');
+            Craft.cp.displayError(t.noAssetsSelectedInVolume || 'No assets selected in this volume.');
             return;
         }
 
-        const warningMessage = 
-            '⚠️ WARNING: You are about to permanently delete ' + assetIds.length + ' assets from this volume.\n\n' +
-            'This action CANNOT be undone!\n\n' +
-            'We strongly recommend downloading the unused assets as a backup before proceeding.\n\n' +
-            'Click "Download CSV" or "Download ZIP" to backup your assets first.\n\n' +
-            'Are you absolutely sure you want to permanently delete these assets?';
-
-        if (!confirm(warningMessage)) {
+        var warning = (t.deleteWarning || 'Are you sure you want to permanently delete {count} assets? This action CANNOT be undone! Download a backup (CSV or ZIP) before proceeding.')
+            .replace('{count}', assetIds.length);
+        if (!confirm(warning)) {
             return;
         }
 
-        // Double confirmation
-        if (!confirm('Final confirmation: Permanently delete ' + assetIds.length + ' assets? This CANNOT be undone!')) {
+        var confirm2 = (t.deleteConfirm || 'Final confirmation: Permanently delete {count} assets? This CANNOT be undone!')
+            .replace('{count}', assetIds.length);
+        if (!confirm(confirm2)) {
             return;
         }
 
@@ -837,41 +889,40 @@
         .then(function(response) {
             const data = response.data;
             if (data.success) {
-                Craft.cp.displayNotice('Permanently deleted ' + data.deletedCount + ' assets.');
-                // Re-scan
+                var notice = (t.permanentlyDeleted || 'Permanently deleted {count} assets.')
+                    .replace('{count}', data.deletedCount);
+                Craft.cp.displayNotice(notice);
                 document.querySelector('.asset-cleaner-scan-btn').click();
             } else {
-                Craft.cp.displayError(data.error || 'An error occurred.');
+                Craft.cp.displayError(data.error || t.error || 'An error occurred.');
             }
         })
-        .catch(function(error) {
+        .catch(function() {
             Craft.cp.displayError(t.error || 'An error occurred.');
         });
     }
 
     // ========================================
-    // Helpers
+    // Dialogs & Overlays
     // ========================================
 
     function showFolderStructureDialog(callback) {
-        // Remove existing dialog if any
         hideFolderStructureDialog();
-        
+
         const overlay = document.createElement('div');
         overlay.id = 'asset-cleaner-folder-dialog';
-        overlay.innerHTML = 
+        overlay.innerHTML =
             '<div class="folder-dialog-content">' +
-                '<h3>ZIP Download Options</h3>' +
-                '<p>How would you like to organize the files in the ZIP?</p>' +
+                '<h3>' + (t.zipDialogTitle || 'ZIP Download Options') + '</h3>' +
+                '<p>' + (t.zipDialogText || 'How would you like to organize the files in the ZIP?') + '</p>' +
                 '<div class="folder-dialog-buttons">' +
-                    '<button type="button" class="btn" id="zip-flat-btn">Flat (all files in root)</button>' +
-                    '<button type="button" class="btn submit" id="zip-folders-btn">Preserve folder structure</button>' +
+                    '<button type="button" class="btn" id="zip-flat-btn">' + (t.zipFlat || 'Flat (all files in root)') + '</button>' +
+                    '<button type="button" class="btn submit" id="zip-folders-btn">' + (t.zipFolders || 'Preserve folder structure') + '</button>' +
                 '</div>' +
-                '<button type="button" class="btn small" id="zip-cancel-btn">Cancel</button>' +
+                '<button type="button" class="btn small" id="zip-cancel-btn">' + (t.cancel || 'Cancel') + '</button>' +
             '</div>';
         document.body.appendChild(overlay);
 
-        // Add event listeners
         document.getElementById('zip-flat-btn').addEventListener('click', function() {
             hideFolderStructureDialog();
             callback(false);
@@ -895,12 +946,11 @@
     }
 
     function showDownloadOverlay(message) {
-        // Remove existing overlay if any
         hideDownloadOverlay();
-        
+
         const overlay = document.createElement('div');
         overlay.id = 'asset-cleaner-download-overlay';
-        overlay.innerHTML = 
+        overlay.innerHTML =
             '<div class="download-overlay-content">' +
                 '<div class="spinner"></div>' +
                 '<p>' + escapeHtml(message) + '</p>' +
@@ -914,6 +964,10 @@
             overlay.remove();
         }
     }
+
+    // ========================================
+    // Helpers
+    // ========================================
 
     function escapeHtml(str) {
         if (!str) return '';

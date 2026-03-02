@@ -164,6 +164,7 @@ class AssetCleanerController extends Controller
         try {
             $request = Craft::$app->getRequest();
             $volumeIds = $request->getBodyParam('volumeIds', []);
+            $scanId = $request->getBodyParam('scanId', '');
 
             if (!is_array($volumeIds)) {
                 $volumeIds = [];
@@ -171,8 +172,33 @@ class AssetCleanerController extends Controller
 
             $volumeIds = array_map('intval', $volumeIds);
 
-            $service = Plugin::getInstance()->assetUsage;
-            $unusedAssets = $service->getUnusedAssets($volumeIds);
+            // Use cached scan results when available — avoids re-running the full
+            // synchronous scan, which times out for large datasets on S3 volumes.
+            $unusedAssets = null;
+            $scanCompletedAt = null;
+            if ($scanId) {
+                $cache = Craft::$app->getCache();
+                $progress = $cache->get("asset-cleaner-progress-{$scanId}");
+                $cachedResults = $cache->get("asset-cleaner-results-{$scanId}");
+
+                if ($progress && ($progress['status'] ?? '') === 'complete' && is_array($cachedResults)) {
+                    $unusedAssets = $cachedResults;
+                    $scanCompletedAt = !empty($progress['completedAt']) ? (int)$progress['completedAt'] : null;
+
+                    // Filter by the requested volumes
+                    if (!empty($volumeIds)) {
+                        $unusedAssets = array_values(array_filter($unusedAssets, function ($asset) use ($volumeIds) {
+                            return in_array((int)($asset['volumeId'] ?? 0), $volumeIds, true);
+                        }));
+                    }
+                }
+            }
+
+            // Fall back to a live scan when no cached results are available
+            if ($unusedAssets === null) {
+                $service = Plugin::getInstance()->assetUsage;
+                $unusedAssets = $service->getUnusedAssets($volumeIds);
+            }
 
             $csv = "ID,Title,Filename,Volume,Size,Path,URL\n";
 
@@ -191,14 +217,8 @@ class AssetCleanerController extends Controller
 
             // Build filename with volume names and timestamp
             $filename = 'unused-assets';
-            
-            // Add volume names if specific volumes were selected
+
             if (!empty($volumeIds)) {
-                $volumes = \craft\elements\Asset::find()
-                    ->volumeId($volumeIds)
-                    ->limit(1)
-                    ->all();
-                
                 $volumeNames = [];
                 foreach ($volumeIds as $volumeId) {
                     $volume = Craft::$app->getVolumes()->getVolumeById($volumeId);
@@ -206,14 +226,14 @@ class AssetCleanerController extends Controller
                         $volumeNames[] = $this->sanitizeFilename($volume->handle);
                     }
                 }
-                
+
                 if (!empty($volumeNames)) {
                     $filename .= '_' . implode('__', $volumeNames);
                 }
             }
-            
-            // Add human-readable timestamp
-            $filename .= '_' . date('Y-m-d_H-i-s') . '.csv';
+
+            // Use the actual scan datetime when available, otherwise fall back to now
+            $filename .= '_' . ($scanCompletedAt ? date('Y-m-d_H-i-s', $scanCompletedAt) : date('Y-m-d_H-i-s')) . '.csv';
 
             $response = Craft::$app->getResponse();
             $response->format = Response::FORMAT_RAW;

@@ -24,6 +24,7 @@ return [
     // Bulk Actions
     'Bulk Actions' => 'Bulk Actions',
     'Bulk Actions (All Volumes)' => 'Bulk Actions (All Volumes)',
+    'Bulk Actions - All Selected Volumes' => 'Bulk Actions - All Selected Volumes',
     'Download CSV' => 'Download CSV',
     'Download ZIP' => 'Download ZIP',
     'Put into Trash' => 'Put into Trash',
@@ -37,6 +38,11 @@ return [
     'Path' => 'Path',
     'Date Created' => 'Date Created',
     
+    // Results warning
+    'Before permanently deleting' => 'Before permanently deleting',
+    'We recommend downloading a ZIP backup of the assets you plan to remove first, or using "Put into Trash" as a safer alternative. Permanent deletions cannot be undone.' => 'We recommend downloading a ZIP backup of the assets you plan to remove first, or using "Put into Trash" as a safer alternative. Permanent deletions cannot be undone.',
+    'Scan older than 24h — results may be outdated' => 'Scan older than 24h — results may be outdated',
+
     // Messages
     'No assets selected.' => 'No assets selected.',
     'No assets found.' => 'No assets found.',
@@ -61,9 +67,13 @@ return [
     'We strongly recommend downloading the unused assets as a backup before proceeding.' => 'We strongly recommend downloading the unused assets as a backup before proceeding.',
     'Are you absolutely sure you want to permanently delete these assets?' => 'Are you absolutely sure you want to permanently delete these assets?',
     'Final confirmation: Permanently delete assets? This CANNOT be undone!' => 'Final confirmation: Permanently delete assets? This CANNOT be undone!',
+    'Are you sure you want to permanently delete {count} assets? This action CANNOT be undone! Download a backup (CSV or ZIP) before proceeding.' => 'Are you sure you want to permanently delete {count} assets? This action CANNOT be undone! Download a backup (CSV or ZIP) before proceeding.',
+    'Final confirmation: Permanently delete {count} assets? This CANNOT be undone!' => 'Final confirmation: Permanently delete {count} assets? This CANNOT be undone!',
     
     // Volume Section
     'unused assets' => 'unused assets',
+    '{count} unused assets — {size}' => '{count} unused assets — {size}',
+    'No unused assets found.' => 'No unused assets found.',
     'No assets selected in this volume.' => 'No assets selected in this volume.',
     
     // Errors
