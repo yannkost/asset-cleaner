@@ -1328,14 +1328,22 @@ class ScanService extends Component
                 if (method_exists($volume, 'getRootPath')) {
                     $volumePath = $volume->getRootPath();
                     if ($volumePath) {
-                        $path = rtrim((string)$volumePath, '/\\') . DIRECTORY_SEPARATOR . ltrim($folderPath, '/\\') . $asset->filename;
+                        $path = (string)$volumePath;
+                        if ($folderPath) {
+                            $path = rtrim($path, '/\\') . '/' . ltrim($folderPath, '/\\');
+                        }
                     }
-                } elseif ($folderPath !== '') {
-                    $path = $folderPath . $asset->filename;
+                }
+
+                if (empty($path) && !empty($volume->handle)) {
+                    $path = '@volumes/' . $volume->handle;
+                    if ($folderPath) {
+                        $path .= '/' . ltrim($folderPath, '/\\');
+                    }
                 }
             }
         } catch (\Throwable) {
-            $path = $folderPath !== '' ? $folderPath . $asset->filename : $asset->filename;
+            $path = '';
         }
 
         return [
