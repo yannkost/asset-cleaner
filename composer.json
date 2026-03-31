@@ -2,8 +2,8 @@
     "name": "yann/craft-asset-cleaner",
     "description": "Identify and clean up unused assets in Craft CMS",
     "type": "craft-plugin",
-    "version": "1.2.0",
-    "license": "MIT",
+    "version": "1.2.1",
+    "license": "proprietary",
     "keywords": [
         "craft",
         "cms",

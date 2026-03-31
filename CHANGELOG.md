@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-03-31
+
+### Fixed
+- Replaced the cache-backed asset scan flow with a file-backed staged scan pipeline stored under `@storage/asset-cleaner/scans/<scanId>`
+- Fixed large scans failing when the cached content index expired before the queue finished processing
+- Removed the need to pass the full asset ID list through each queued batch job
+
+### Changed
+- Split background scans into dedicated setup, relations, content, and finalize queue stages
+- Snapshotted assets into chunk files and resolved usage from relations and content in one pass per scan
+- Updated scan progress reporting to reflect the current scan stage
+- Restored legacy CSV path formatting for unused asset exports
+
 ## [1.0.1] - 2026-02-07
 
 ### Added

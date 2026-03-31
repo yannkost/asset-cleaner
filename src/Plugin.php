@@ -16,6 +16,7 @@ use craft\web\View;
 use craft\console\Application as ConsoleApplication;
 use yann\assetcleaner\assetbundles\assetcleaner\AssetCleanerAsset;
 use yann\assetcleaner\services\AssetUsageService;
+use yann\assetcleaner\services\ScanService;
 use yann\assetcleaner\utilities\AssetCleanerUtility;
 use yii\base\Event;
 
@@ -25,6 +26,7 @@ use yii\base\Event;
  * Identify and clean up unused assets in Craft CMS
  *
  * @property-read AssetUsageService $assetUsage
+ * @property-read ScanService $scanService
  *
  * @since 1.0.0
  */
@@ -58,6 +60,7 @@ class Plugin extends BasePlugin
         return [
             'components' => [
                 'assetUsage' => AssetUsageService::class,
+                'scanService' => ScanService::class,
             ],
         ];
     }
@@ -68,7 +71,7 @@ class Plugin extends BasePlugin
     public function init(): void
     {
         parent::init();
-        
+
         // Set plugin icon
         $this->icon = $this->getBasePath() . '/icon.svg';
 
@@ -181,15 +184,13 @@ class Plugin extends BasePlugin
 
                     // Check for last scan results to auto-restore
                     try {
-                        $cache = Craft::$app->getCache();
-                        $lastScan = $cache->get('asset-cleaner-last-scan');
-                        if (is_array($lastScan) && !empty($lastScan['scanId']) && !empty($lastScan['completedAt'])
-                            && $cache->get("asset-cleaner-results-{$lastScan['scanId']}") !== false) {
+                        $lastScan = $this->scanService->getLastScan();
+                        if (is_array($lastScan) && !empty($lastScan['scanId']) && !empty($lastScan['completedAt'])) {
                             $jsSettings['lastScanId'] = $lastScan['scanId'];
                             $jsSettings['lastScanTime'] = date('c', (int)$lastScan['completedAt']);
                         }
                     } catch (\Throwable $e) {
-                        Craft::warning('Could not read last scan cache: ' . $e->getMessage(), __METHOD__);
+                        Craft::warning('Could not read last scan state: ' . $e->getMessage(), __METHOD__);
                     }
 
                     $view->registerJs(
