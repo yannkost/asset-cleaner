@@ -63,22 +63,11 @@ class AssetCleanerController extends Controller
             // Generate a unique scan ID
             $scanId = uniqid('scan_', true);
 
-            // Write initial progress to cache
-            $cache = Craft::$app->getCache();
-            $cache->set("asset-cleaner-progress-{$scanId}", [
-                'status' => 'pending',
-                'progress' => 0,
-                'totalAssets' => 0,
-                'processedAssets' => 0,
-                'usedCount' => 0,
-                'unusedCount' => 0,
-                'error' => null,
-            ], 3600);
+            Plugin::getInstance()->scanService->initializeScan($scanId, $volumeIds, 100);
 
             // Push the setup job to the queue
             Craft::$app->getQueue()->push(new ScanSetupJob([
                 'scanId' => $scanId,
-                'volumeIds' => $volumeIds,
             ]));
 
             return $this->asJson([
@@ -108,20 +97,25 @@ class AssetCleanerController extends Controller
             return $this->asJson(['success' => false, 'error' => 'Missing scanId.']);
         }
 
-        $progress = Craft::$app->getCache()->get("asset-cleaner-progress-{$scanId}");
-        if ($progress === false) {
+        $scanService = Plugin::getInstance()->scanService;
+        $progress = $scanService->getProgress($scanId);
+        if (!$progress) {
             return $this->asJson(['success' => false, 'error' => 'Scan not found.']);
         }
 
+        $stage = (string)($progress['stage'] ?? '');
+
         return $this->asJson([
             'success' => true,
-            'status' => $progress['status'],
-            'progress' => (int)$progress['progress'],
-            'totalAssets' => (int)$progress['totalAssets'],
-            'processedAssets' => (int)$progress['processedAssets'],
-            'usedCount' => (int)$progress['usedCount'],
-            'unusedCount' => (int)$progress['unusedCount'],
-            'error' => $progress['error'],
+            'status' => (string)($progress['status'] ?? 'pending'),
+            'stage' => $stage,
+            'stageLabel' => $scanService->getStageLabel($stage),
+            'progress' => (int)($progress['progress'] ?? 0),
+            'totalAssets' => (int)($progress['totalAssets'] ?? 0),
+            'processedAssets' => (int)($progress['processedAssets'] ?? 0),
+            'usedCount' => (int)($progress['usedCount'] ?? 0),
+            'unusedCount' => (int)($progress['unusedCount'] ?? 0),
+            'error' => $progress['error'] ?? null,
         ]);
     }
 
@@ -139,18 +133,21 @@ class AssetCleanerController extends Controller
             return $this->asJson(['success' => false, 'error' => 'Missing scanId.']);
         }
 
-        $progress = Craft::$app->getCache()->get("asset-cleaner-progress-{$scanId}");
-        if (!$progress || $progress['status'] !== 'complete') {
+        $scanService = Plugin::getInstance()->scanService;
+        $progress = $scanService->getProgress($scanId);
+        if (!$progress || ($progress['status'] ?? '') !== 'complete') {
             return $this->asJson(['success' => false, 'error' => 'Scan not complete.']);
         }
 
-        $unusedAssets = Craft::$app->getCache()->get("asset-cleaner-results-{$scanId}") ?: [];
+        $unusedAssets = $scanService->getResults($scanId) ?? [];
+        $meta = $scanService->getMeta($scanId) ?? [];
 
         return $this->asJson([
             'success' => true,
-            'usedCount' => (int)$progress['usedCount'],
-            'unusedCount' => (int)$progress['unusedCount'],
+            'usedCount' => (int)($progress['usedCount'] ?? 0),
+            'unusedCount' => (int)($progress['unusedCount'] ?? 0),
             'unusedAssets' => $unusedAssets,
+            'completedAt' => !empty($meta['completedAt']) ? date('c', (int)$meta['completedAt']) : null,
         ]);
     }
 
@@ -172,18 +169,19 @@ class AssetCleanerController extends Controller
 
             $volumeIds = array_map('intval', $volumeIds);
 
-            // Use cached scan results when available — avoids re-running the full
+            // Use file-backed scan results when available — avoids re-running the full
             // synchronous scan, which times out for large datasets on S3 volumes.
             $unusedAssets = null;
             $scanCompletedAt = null;
             if ($scanId) {
-                $cache = Craft::$app->getCache();
-                $progress = $cache->get("asset-cleaner-progress-{$scanId}");
-                $cachedResults = $cache->get("asset-cleaner-results-{$scanId}");
+                $scanService = Plugin::getInstance()->scanService;
+                $progress = $scanService->getProgress($scanId);
+                $storedResults = $scanService->getResults($scanId);
+                $meta = $scanService->getMeta($scanId);
 
-                if ($progress && ($progress['status'] ?? '') === 'complete' && is_array($cachedResults)) {
-                    $unusedAssets = $cachedResults;
-                    $scanCompletedAt = !empty($progress['completedAt']) ? (int)$progress['completedAt'] : null;
+                if ($progress && ($progress['status'] ?? '') === 'complete' && is_array($storedResults)) {
+                    $unusedAssets = $storedResults;
+                    $scanCompletedAt = !empty($meta['completedAt']) ? (int)$meta['completedAt'] : null;
 
                     // Filter by the requested volumes
                     if (!empty($volumeIds)) {
@@ -194,7 +192,7 @@ class AssetCleanerController extends Controller
                 }
             }
 
-            // Fall back to a live scan when no cached results are available
+            // Fall back to a live scan when no stored scan results are available
             if ($unusedAssets === null) {
                 $service = Plugin::getInstance()->assetUsage;
                 $unusedAssets = $service->getUnusedAssets($volumeIds);
@@ -305,7 +303,7 @@ class AssetCleanerController extends Controller
 
         $tempDir = Craft::$app->getPath()->getTempPath() . '/asset-cleaner-' . uniqid();
         FileHelper::createDirectory($tempDir);
-        
+
         // Create subdirectory for temporary asset files
         $tempAssetsDir = $tempDir . '/assets';
         FileHelper::createDirectory($tempAssetsDir);
@@ -327,7 +325,7 @@ class AssetCleanerController extends Controller
                 // Create a unique temp filename to avoid collisions
                 $tempFilename = $asset->id . '_' . $asset->filename;
                 $tempFilePath = $tempAssetsDir . '/' . $tempFilename;
-                
+
                 // Stream the asset to a temp file in chunks (memory-efficient)
                 $stream = $asset->getStream();
                 if ($stream) {
@@ -342,7 +340,7 @@ class AssetCleanerController extends Controller
                         }
                         fclose($tempFile);
                         fclose($stream);
-                        
+
                         // Build the path inside the ZIP
                         $zipEntryPath = $asset->filename;
                         if ($preserveFolders) {
@@ -360,7 +358,7 @@ class AssetCleanerController extends Controller
                             }
                             $zipEntryPath = $volumeHandle . '/' . ltrim($folderPath, '/') . $asset->filename;
                         }
-                        
+
                         // Add file to ZIP from disk (not memory)
                         $zip->addFile($tempFilePath, $zipEntryPath);
                         $tempFiles[] = $tempFilePath;

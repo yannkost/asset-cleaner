@@ -10,17 +10,14 @@ use yann\assetcleaner\helpers\Logger;
 use yann\assetcleaner\Plugin;
 
 /**
- * Setup job that creates the file-backed scan workspace and snapshots
- * the assets in scope into chunk files.
+ * Queue stage that scans the relations table once for all assets in the scan.
  */
-class ScanSetupJob extends BaseJob
+class ScanRelationsJob extends BaseJob
 {
     /**
      * @var string The scan ID
      */
     public string $scanId = '';
-
-
 
     /**
      * @inheritdoc
@@ -30,21 +27,13 @@ class ScanSetupJob extends BaseJob
         $scanService = Plugin::getInstance()->scanService;
 
         try {
-            $scanService->snapshotAssets($this->scanId);
-            $meta = $scanService->getMeta($this->scanId);
-            $totalAssets = (int)($meta['totalAssets'] ?? 0);
+            $scanService->collectRelationsUsage($this->scanId);
 
-            $this->setProgress($queue, $totalAssets > 0 ? 0.1 : 1.0);
-
-            if ($totalAssets === 0) {
-                return;
-            }
-
-            Craft::$app->getQueue()->push(new ScanRelationsJob([
+            Craft::$app->getQueue()->push(new ScanContentJob([
                 'scanId' => $this->scanId,
             ]));
         } catch (\Throwable $e) {
-            Logger::exception('Scan setup failed', $e);
+            Logger::exception('Scan relations stage failed', $e);
             $scanService->failScan($this->scanId, $e);
             throw $e;
         }
@@ -55,6 +44,6 @@ class ScanSetupJob extends BaseJob
      */
     protected function defaultDescription(): ?string
     {
-        return Craft::t('asset-cleaner', 'Preparing asset scan');
+        return Craft::t('asset-cleaner', 'Scanning asset relations');
     }
 }
