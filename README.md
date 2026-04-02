@@ -157,10 +157,25 @@ No database migrations are required. The plugin works against Craft's existing t
 
 ### File-backed scan workspaces
 
-Each scan stores its transient data under:
+Each scan stores its transient data under a file-backed workspace. By default, the plugin uses:
 
 ```text
 @storage/asset-cleaner/scans/<scanId>/
+```
+
+If your web and queue processes do not share the same Craft storage path, you can override the workspace base path with either:
+
+- the `ASSET_CLEANER_SCAN_PATH` environment variable
+- a `scanWorkspacePath` value in `config/asset-cleaner.php`
+
+Example plugin config:
+
+```php
+<?php
+
+return [
+    'scanWorkspacePath' => '$ASSET_CLEANER_SCAN_PATH',
+];
 ```
 
 Typical files include:
@@ -172,7 +187,7 @@ Typical files include:
 - relation/content usage ID files
 - final unused asset results
 
-This approach makes large scans more reliable than cache-backed scan state, especially on sites with large asset libraries.
+This approach makes large scans more reliable than cache-backed scan state, especially on sites with large asset libraries. For containerized environments, make sure the configured scan workspace path is shared between web and queue workers.
 
 ### Memory-efficient ZIP creation
 

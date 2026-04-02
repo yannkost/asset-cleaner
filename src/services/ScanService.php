@@ -13,6 +13,7 @@ use craft\elements\Entry;
 use craft\elements\GlobalSet;
 use craft\helpers\FileHelper;
 use craft\helpers\Json;
+use yann\assetcleaner\helpers\Logger;
 use yii\base\Exception;
 
 /**
@@ -104,6 +105,12 @@ class ScanService extends Component
             'usedRelationCount' => 0,
             'usedContentCount' => 0,
         ]);
+
+        $this->assertReadableFile($this->getMetaPath($scanId), 'scan metadata file');
+        $this->assertReadableFile($this->getProgressPath($scanId), 'scan progress file');
+        $this->assertReadableFile($this->getStatePath($scanId), 'scan state file');
+
+        Logger::debug('Initialized file-backed scan workspace.', $this->buildStorageDiagnostics($scanId));
     }
 
     /**
@@ -670,7 +677,45 @@ class ScanService extends Component
      */
     public function getBaseStoragePath(): string
     {
+        $configuredPath = $this->getConfiguredWorkspacePath();
+        if ($configuredPath !== null) {
+            return $configuredPath;
+        }
+
         return Craft::getAlias('@storage') . DIRECTORY_SEPARATOR . 'asset-cleaner';
+    }
+
+    /**
+     * @return string|null
+     */
+    private function getConfiguredWorkspacePath(): ?string
+    {
+        $configuredPath = null;
+
+        try {
+            $config = Craft::$app->getConfig()->getConfigFromFile('asset-cleaner');
+            if (is_array($config) && isset($config['scanWorkspacePath']) && is_string($config['scanWorkspacePath'])) {
+                $configuredPath = trim($config['scanWorkspacePath']);
+            }
+        } catch (\Throwable $e) {
+            Logger::warning('Could not load Asset Cleaner config while resolving the scan workspace path.', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $envPath = getenv('ASSET_CLEANER_SCAN_PATH');
+        if (is_string($envPath) && trim($envPath) !== '') {
+            $configuredPath = trim($envPath);
+        }
+
+        if ($configuredPath === null || $configuredPath === '') {
+            return null;
+        }
+
+        $configuredPath = Craft::parseEnv($configuredPath);
+        $resolvedAlias = Craft::getAlias($configuredPath, false);
+
+        return $resolvedAlias !== false ? $resolvedAlias : $configuredPath;
     }
 
     /**
@@ -803,8 +848,8 @@ class ScanService extends Component
      */
     private function ensureBaseDirectories(): void
     {
-        FileHelper::createDirectory($this->getBaseStoragePath());
-        FileHelper::createDirectory($this->getScansRootPath());
+        $this->ensureWritableDirectory($this->getBaseStoragePath());
+        $this->ensureWritableDirectory($this->getScansRootPath());
     }
 
     /**
@@ -814,12 +859,38 @@ class ScanService extends Component
      */
     private function requireMeta(string $scanId): array
     {
+        $metaPath = $this->getMetaPath($scanId);
         $meta = $this->getMeta($scanId);
         if ($meta === null) {
-            throw new Exception("Scan metadata not found for '{$scanId}'.");
+            Logger::error('Scan metadata file is missing or unreadable.', $this->buildStorageDiagnostics($scanId));
+            throw new Exception("Scan metadata not found for '{$scanId}'. Expected metadata file at '{$metaPath}'.");
         }
 
         return $meta;
+    }
+
+    /**
+     * @param string|null $scanId
+     * @return array<string,mixed>
+     */
+    private function buildStorageDiagnostics(?string $scanId = null): array
+    {
+        $scanPath = $scanId !== null ? $this->getScanPath($scanId) : null;
+        $metaPath = $scanId !== null ? $this->getMetaPath($scanId) : null;
+
+        return [
+            'scanId' => $scanId,
+            'configuredWorkspacePath' => $this->getConfiguredWorkspacePath(),
+            'resolvedBaseStoragePath' => $this->getBaseStoragePath(),
+            'storageAlias' => Craft::getAlias('@storage', false),
+            'scansRootPath' => $this->getScansRootPath(),
+            'scanPath' => $scanPath,
+            'scanPathExists' => $scanPath !== null ? is_dir($scanPath) : null,
+            'metaPath' => $metaPath,
+            'metaPathExists' => $metaPath !== null ? is_file($metaPath) : null,
+            'phpSapi' => PHP_SAPI,
+            'hostname' => function_exists('gethostname') ? gethostname() : null,
+        ];
     }
 
     /**
@@ -1278,8 +1349,14 @@ class ScanService extends Component
             return 0;
         }
 
+        $this->ensureWritableDirectory(dirname($path));
+
         $fh = fopen($path, 'wb');
         if ($fh === false) {
+            $this->logStorageFailure('Unable to open results file for writing.', [
+                'scanId' => $scanId,
+                'path' => $path,
+            ]);
             throw new Exception("Unable to open results file for scan '{$scanId}'.");
         }
 
@@ -1293,13 +1370,31 @@ class ScanService extends Component
                 foreach ($assets as $asset) {
                     /** @var Asset $asset */
                     $row = $this->buildUnusedAssetRow($asset);
-                    fwrite($fh, Json::encode($row) . PHP_EOL);
+                    $written = fwrite($fh, Json::encode($row) . PHP_EOL);
+                    if ($written === false) {
+                        $this->logStorageFailure('Unable to write unused asset result row.', [
+                            'scanId' => $scanId,
+                            'path' => $path,
+                            'assetId' => (int)$asset->id,
+                        ]);
+                        throw new Exception("Unable to write unused asset results for scan '{$scanId}'.");
+                    }
                     $count++;
                 }
+            }
+
+            if (!fflush($fh)) {
+                $this->logStorageFailure('Unable to flush unused asset results file.', [
+                    'scanId' => $scanId,
+                    'path' => $path,
+                ]);
+                throw new Exception("Unable to flush results file for scan '{$scanId}'.");
             }
         } finally {
             fclose($fh);
         }
+
+        $this->assertReadableFile($path, 'unused asset results file');
 
         return $count;
     }
@@ -1474,7 +1569,7 @@ class ScanService extends Component
      */
     private function writeJsonFile(string $path, array $payload): void
     {
-        FileHelper::createDirectory(dirname($path));
+        $this->ensureWritableDirectory(dirname($path));
         $json = Json::encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         $this->writeFileAtomically($path, $json . PHP_EOL);
     }
@@ -1509,20 +1604,53 @@ class ScanService extends Component
      */
     private function writeNdjsonFile(string $path, array $rows): void
     {
-        FileHelper::createDirectory(dirname($path));
+        $this->ensureWritableDirectory(dirname($path));
 
-        $fh = fopen($path, 'wb');
+        $tmpPath = $path . '.tmp-' . bin2hex(random_bytes(6));
+        $fh = fopen($tmpPath, 'wb');
         if ($fh === false) {
+            $this->logStorageFailure('Unable to open temporary NDJSON file for writing.', [
+                'path' => $path,
+                'tmpPath' => $tmpPath,
+            ]);
             throw new Exception("Unable to open '{$path}' for writing.");
         }
 
         try {
             foreach ($rows as $row) {
-                fwrite($fh, Json::encode($row) . PHP_EOL);
+                $written = fwrite($fh, Json::encode($row) . PHP_EOL);
+                if ($written === false) {
+                    $this->logStorageFailure('Unable to write NDJSON row to temporary scan file.', [
+                        'path' => $path,
+                        'tmpPath' => $tmpPath,
+                    ]);
+                    throw new Exception("Unable to write '{$path}'.");
+                }
+            }
+
+            if (!fflush($fh)) {
+                $this->logStorageFailure('Unable to flush temporary NDJSON scan file.', [
+                    'path' => $path,
+                    'tmpPath' => $tmpPath,
+                ]);
+                throw new Exception("Unable to flush '{$path}'.");
             }
         } finally {
             fclose($fh);
         }
+
+        if (!@rename($tmpPath, $path)) {
+            $error = error_get_last();
+            @unlink($tmpPath);
+            $this->logStorageFailure('Unable to move temporary NDJSON scan file into place.', [
+                'path' => $path,
+                'tmpPath' => $tmpPath,
+                'renameError' => $error['message'] ?? 'Unknown rename error.',
+            ]);
+            throw new Exception("Unable to finalize '{$path}' after writing.");
+        }
+
+        $this->assertReadableFile($path, 'NDJSON file');
     }
 
     /**
@@ -1532,7 +1660,7 @@ class ScanService extends Component
      */
     private function writeLines(string $path, array $lines): void
     {
-        FileHelper::createDirectory(dirname($path));
+        $this->ensureWritableDirectory(dirname($path));
         $content = '';
         foreach ($lines as $line) {
             $content .= trim((string)$line) . PHP_EOL;
@@ -1544,14 +1672,105 @@ class ScanService extends Component
      * @param string $path
      * @param string $contents
      * @return void
+     * @throws Exception
      */
     private function writeFileAtomically(string $path, string $contents): void
     {
-        FileHelper::createDirectory(dirname($path));
+        $this->ensureWritableDirectory(dirname($path));
 
         $tmpPath = $path . '.tmp-' . bin2hex(random_bytes(6));
-        file_put_contents($tmpPath, $contents, LOCK_EX);
-        rename($tmpPath, $path);
+        $bytesWritten = file_put_contents($tmpPath, $contents, LOCK_EX);
+        if ($bytesWritten === false) {
+            $this->logStorageFailure('Unable to write temporary scan file.', [
+                'path' => $path,
+                'tmpPath' => $tmpPath,
+            ]);
+            throw new Exception("Unable to write temporary file for '{$path}'.");
+        }
+
+        if (!@rename($tmpPath, $path)) {
+            $error = error_get_last();
+            @unlink($tmpPath);
+            $this->logStorageFailure('Unable to move temporary scan file into place.', [
+                'path' => $path,
+                'tmpPath' => $tmpPath,
+                'renameError' => $error['message'] ?? 'Unknown rename error.',
+            ]);
+            throw new Exception("Unable to finalize '{$path}' after writing.");
+        }
+
+        $this->assertReadableFile($path, 'scan file');
+    }
+
+    /**
+     * @param string $directory
+     * @return void
+     * @throws Exception
+     */
+    private function ensureWritableDirectory(string $directory): void
+    {
+        try {
+            FileHelper::createDirectory($directory);
+        } catch (\Throwable $e) {
+            $this->logStorageFailure('Unable to create scan workspace directory.', [
+                'directory' => $directory,
+                'error' => $e->getMessage(),
+            ]);
+            throw new Exception("Unable to create scan workspace directory '{$directory}': " . $e->getMessage());
+        }
+
+        clearstatcache(true, $directory);
+
+        if (!is_dir($directory)) {
+            $this->logStorageFailure('Scan workspace directory does not exist after creation attempt.', [
+                'directory' => $directory,
+            ]);
+            throw new Exception("Scan workspace directory '{$directory}' does not exist after creation.");
+        }
+
+        if (!is_writable($directory)) {
+            $this->logStorageFailure('Scan workspace directory is not writable.', [
+                'directory' => $directory,
+            ]);
+            throw new Exception("Scan workspace directory '{$directory}' is not writable.");
+        }
+    }
+
+    /**
+     * @param string $path
+     * @param string $label
+     * @return void
+     * @throws Exception
+     */
+    private function assertReadableFile(string $path, string $label): void
+    {
+        clearstatcache(true, $path);
+
+        if (!is_file($path)) {
+            $this->logStorageFailure('Expected scan file was not found after writing.', [
+                'path' => $path,
+                'label' => $label,
+            ]);
+            throw new Exception("Expected {$label} at '{$path}' but it was not found after writing.");
+        }
+
+        if (!is_readable($path)) {
+            $this->logStorageFailure('Expected scan file is not readable after writing.', [
+                'path' => $path,
+                'label' => $label,
+            ]);
+            throw new Exception("Expected {$label} at '{$path}' but it is not readable.");
+        }
+    }
+
+    /**
+     * @param string $message
+     * @param array $context
+     * @return void
+     */
+    private function logStorageFailure(string $message, array $context = []): void
+    {
+        Logger::error($message, array_merge($this->buildStorageDiagnostics(), $context));
     }
 
     /**

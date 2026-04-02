@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Added configurable scan workspace path support via the `ASSET_CLEANER_SCAN_PATH` environment variable or `scanWorkspacePath` in `config/asset-cleaner.php`
+
+### Changed
+- Hardened scan workspace file writes with stricter validation, readability checks, and better failure handling
+
+### Fixed
+- Added path-aware diagnostics when scan metadata files are missing or unreadable, including resolved storage context details to help debug container and shared-storage setups
+
 ## [1.2.1] - 2026-03-31
 
 ### Fixed
