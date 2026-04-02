@@ -29,9 +29,17 @@ class ScanSetupJob extends BaseJob
     {
         $scanService = Plugin::getInstance()->scanService;
 
+        if (!$scanService->scanExists($this->scanId)) {
+            return;
+        }
+
         try {
             $scanService->snapshotAssets($this->scanId);
             $meta = $scanService->getMeta($this->scanId);
+            if ($meta === null) {
+                return;
+            }
+
             $totalAssets = (int)($meta['totalAssets'] ?? 0);
 
             $this->setProgress($queue, $totalAssets > 0 ? 0.1 : 1.0);

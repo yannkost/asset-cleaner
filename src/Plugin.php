@@ -15,6 +15,7 @@ use craft\services\Utilities;
 use craft\web\View;
 use craft\console\Application as ConsoleApplication;
 use yann\assetcleaner\assetbundles\assetcleaner\AssetCleanerAsset;
+use yann\assetcleaner\models\Settings;
 use yann\assetcleaner\services\AssetUsageService;
 use yann\assetcleaner\services\ScanService;
 use yann\assetcleaner\utilities\AssetCleanerUtility;
@@ -35,12 +36,12 @@ class Plugin extends BasePlugin
     /**
      * @var string
      */
-    public string $schemaVersion = '1.0.0';
+    public string $schemaVersion = '1.1.0';
 
     /**
      * @var bool
      */
-    public bool $hasCpSettings = false;
+    public bool $hasCpSettings = true;
 
     /**
      * @var bool
@@ -232,5 +233,23 @@ class Plugin extends BasePlugin
                 }
             }
         );
+    }
+
+    /**
+     * @inheritdoc
+     */
+    protected function createSettingsModel(): ?\craft\base\Model
+    {
+        return new Settings();
+    }
+
+    /**
+     * @inheritdoc
+     */
+    protected function settingsHtml(): ?string
+    {
+        return Craft::$app->getView()->renderTemplate('asset-cleaner/_settings', [
+            'settings' => $this->getSettings(),
+        ]);
     }
 }

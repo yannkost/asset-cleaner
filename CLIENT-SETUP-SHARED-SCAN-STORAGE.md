@@ -22,16 +22,23 @@ If they do not share the same filesystem path, the queue worker may fail with er
 
 ## Recommended solution
 
-Configure a **shared mounted directory** that is available in **both** the web container and the queue container, and point Asset Cleaner at that directory.
+If you want to keep using **file-based scan storage**, configure a **shared mounted directory** that is available in **both** the web container and the queue container, and point Asset Cleaner at that directory.
+
+If your infrastructure does **not** provide a shared filesystem between web and queue workers, use **database-based scan storage** instead. Database mode is better suited for containerized or cloud-style environments where shared filesystem access is not guaranteed.
 
 ## Configuration options
 
-Asset Cleaner supports a custom scan workspace path via either:
+Asset Cleaner supports two scan storage modes:
+
+1. **File-based** - stores scan state in a shared filesystem workspace
+2. **Database-based** - stores scan state in the database
+
+For file-based mode, Asset Cleaner supports a custom scan workspace path via either:
 
 1. the `ASSET_CLEANER_SCAN_PATH` environment variable
 2. the `scanWorkspacePath` setting in `config/asset-cleaner.php`
 
-The recommended setup is to use **both**:
+The recommended setup for file-based mode is to use **both**:
 
 - environment variable for the actual path
 - config file to read that environment variable

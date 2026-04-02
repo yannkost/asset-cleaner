@@ -7,8 +7,10 @@ Identify and clean up unused assets in Craft CMS 5.
 - **View Usage Button** - See where any asset is used directly from the asset edit page
 - **Utilities Page** - Scan selected volumes for unused assets with bulk actions
 - **Staged Background Scanning** - Scans run as chained queue jobs with dedicated setup, relations, content, and finalize stages
-- **File-Backed Scan State** - Long-running scans store progress and intermediate data under `@storage/asset-cleaner/scans/<scanId>` instead of relying on volatile cache entries
-- **Large Library Friendly** - Asset snapshots are chunked to disk and content is processed in batches for much better performance on large datasets
+- **Configurable Scan Storage** - Choose between file-based and database-based scan storage
+- **File-Backed Scan State** - Long-running scans can store progress and intermediate data under `@storage/asset-cleaner/scans/<scanId>` or a shared custom workspace path
+- **Database-Backed Scan State** - Containerized and cloud-style installs can store scan state in the database when shared filesystem access is not guaranteed
+- **Large Library Friendly** - Asset snapshots are chunked and content is processed in batches for much better performance on large datasets
 - **Per-Volume Results** - Results grouped by volume with individual file counts and total sizes
 - **Export Options** - Download CSV or ZIP of unused assets with smart filenames
 - **Folder Structure Option** - Choose to preserve folder structure or flatten files in ZIP downloads
@@ -76,7 +78,7 @@ php craft plugin/install asset-cleaner
 
 The utility page shows progress while the scan moves through these stages:
 
-1. **Preparing asset snapshot** - Builds the file-backed snapshot of assets in scope
+1. **Preparing asset snapshot** - Builds the stored snapshot of assets in scope
 2. **Scanning relations** - Collects asset usage from Craft's relations table
 3. **Scanning content** - Scans relevant rich text fields and globals in batches
 4. **Finalizing results** - Merges usage data and writes the final unused asset results
@@ -137,12 +139,12 @@ The plugin identifies unused assets by performing several checks across your Cra
 3. **Global Sets** - Checks supported global set content fields for asset references
 4. **Nested Entries** - Resolves nested entries to top-level entries for usage reporting
 
-For large scans, the plugin uses a file-backed staged pipeline:
+For large scans, the plugin uses a staged pipeline:
 
-1. **Snapshot assets in scope** into chunk files under `@storage/asset-cleaner/scans/<scanId>/assets`
+1. **Snapshot assets in scope** into the active scan storage backend
 2. **Build usage sets once** from relations and content instead of rescanning all content for every asset
 3. **Process entries in batches** rather than loading the full content dataset into memory
-4. **Write final results to disk** so long-running scans are not interrupted by cache expiry
+4. **Persist final unused results** so completed scans can be restored and exported
 
 The matching strategy prefers stronger signals first:
 
@@ -151,22 +153,27 @@ The matching strategy prefers stronger signals first:
 - normalized URL/path matches
 - unique filename fallback matches
 
-No database migrations are required. The plugin works against Craft's existing tables and stores transient scan state in the Craft storage folder.
+The plugin can store transient scan state either on disk or in dedicated database tables, depending on your installation requirements.
 
 ## Technical Details
 
-### File-backed scan workspaces
+### Scan storage modes
 
-Each scan stores its transient data under a file-backed workspace. By default, the plugin uses:
+Asset Cleaner supports two scan storage modes:
+
+#### File-based storage
+
+By default, scans are stored in a file-backed workspace under:
 
 ```text
 @storage/asset-cleaner/scans/<scanId>/
 ```
 
-If your web and queue processes do not share the same Craft storage path, you can override the workspace base path with either:
+You can override the workspace base path with either:
 
 - the `ASSET_CLEANER_SCAN_PATH` environment variable
 - a `scanWorkspacePath` value in `config/asset-cleaner.php`
+- the plugin settings in the control panel
 
 Example plugin config:
 
@@ -178,16 +185,27 @@ return [
 ];
 ```
 
-Typical files include:
+Typical file-based scan artifacts include:
 
 - `meta.json`
 - `progress.json`
-- `state.json`
 - asset chunk files
 - relation/content usage ID files
 - final unused asset results
 
-This approach makes large scans more reliable than cache-backed scan state, especially on sites with large asset libraries. For containerized environments, make sure the configured scan workspace path is shared between web and queue workers.
+File-based storage is a good default on single-server installs or setups where web and queue workers share the same filesystem path.
+
+#### Database-based storage
+
+Database-based storage keeps scan state, asset snapshots, used asset IDs, and final results in dedicated database tables instead of the filesystem.
+
+This mode is recommended for:
+
+- containerized environments
+- cloud-style installs
+- setups where web and queue workers do not share a reliable filesystem
+
+You can switch between file-based and database-based storage in the plugin settings, and config file values can override those settings when needed.
 
 ### Memory-efficient ZIP creation
 

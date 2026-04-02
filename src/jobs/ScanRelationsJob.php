@@ -26,8 +26,16 @@ class ScanRelationsJob extends BaseJob
     {
         $scanService = Plugin::getInstance()->scanService;
 
+        if (!$scanService->scanExists($this->scanId)) {
+            return;
+        }
+
         try {
             $scanService->collectRelationsUsage($this->scanId);
+
+            if (!$scanService->scanExists($this->scanId)) {
+                return;
+            }
 
             Craft::$app->getQueue()->push(new ScanContentJob([
                 'scanId' => $this->scanId,

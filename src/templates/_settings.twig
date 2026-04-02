@@ -1,0 +1,40 @@
+{% import '_includes/forms.twig' as forms %}
+
+{% set storageModeOptions = [
+    { label: 'File-based'|t('asset-cleaner'), value: 'file' },
+    { label: 'Database-based'|t('asset-cleaner'), value: 'database' },
+] %}
+
+{{ forms.selectField({
+    first: true,
+    label: 'Scan storage mode'|t('asset-cleaner'),
+    instructions: 'Choose how Asset Cleaner stores transient scan state. File-based storage is the default and works well when web and queue workers share a filesystem. Database-based storage is better suited for containerized or cloud-style environments where shared filesystem access is not guaranteed.'|t('asset-cleaner'),
+    id: 'scanStorageMode',
+    name: 'scanStorageMode',
+    value: settings.scanStorageMode ?? 'file',
+    options: storageModeOptions,
+    errors: settings.getErrors('scanStorageMode') ?? [],
+}) }}
+
+{{ forms.autosuggestField({
+    label: 'File-based scan workspace path'|t('asset-cleaner'),
+    instructions: 'Optional. Only used when scan storage mode is set to File-based. Defaults to `@storage/asset-cleaner`. You can also override this with `scanWorkspacePath` in `config/asset-cleaner.php` or the `ASSET_CLEANER_SCAN_PATH` environment variable.'|t('asset-cleaner'),
+    id: 'scanWorkspacePath',
+    name: 'scanWorkspacePath',
+    suggestEnvVars: true,
+    suggestAliases: true,
+    value: settings.scanWorkspacePath ?? '',
+    placeholder: '@storage/asset-cleaner',
+    errors: settings.getErrors('scanWorkspacePath') ?? [],
+}) }}
+
+<div class="readable">
+    <p>
+        {{ 'Notes:'|t('asset-cleaner') }}
+    </p>
+    <ul>
+        <li>{{ 'Only the latest scan is retained for restore/export workflows.'|t('asset-cleaner') }}</li>
+        <li>{{ 'When using File-based storage in multi-container setups, make sure the configured workspace path is shared between web and queue workers.'|t('asset-cleaner') }}</li>
+        <li>{{ 'Config file values override these control panel settings.'|t('asset-cleaner') }}</li>
+    </ul>
+</div>

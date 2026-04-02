@@ -11,20 +11,18 @@ use craft\db\Table;
 use craft\elements\Asset;
 use craft\elements\Entry;
 use craft\elements\GlobalSet;
-use craft\helpers\FileHelper;
-use craft\helpers\Json;
 use yann\assetcleaner\helpers\Logger;
-use yii\base\Exception;
+use yann\assetcleaner\models\Settings;
+use yann\assetcleaner\Plugin;
+use yann\assetcleaner\services\stores\DbScanStore;
+use yann\assetcleaner\services\stores\FileScanStore;
+use yann\assetcleaner\services\stores\ScanStoreInterface;
 
 /**
- * File-backed scan orchestration and staged scan helpers.
+ * Storage-agnostic scan coordinator.
  *
- * This service stores scan state under @storage/asset-cleaner/scans/<scanId>
- * and provides the domain logic for:
- * - creating scan workspaces
- * - snapshotting assets into chunk files
- * - collecting used asset IDs from relations and content
- * - finalizing scan results into file-backed outputs
+ * This service owns the scan pipeline orchestration while delegating
+ * persistence to the configured scan store backend.
  */
 class ScanService extends Component
 {
@@ -41,76 +39,52 @@ class ScanService extends Component
     private const DEFAULT_ASSET_CHUNK_SIZE = 100;
     private const DEFAULT_ENTRY_BATCH_SIZE = 200;
     private const DEFAULT_RESULT_QUERY_CHUNK_SIZE = 250;
-    private const LAST_SCAN_FILE = 'last-scan.json';
 
     /**
-     * Create the scan workspace and write initial metadata/progress files.
+     * @var array<string, ScanStoreInterface>
+     */
+    private array $stores = [];
+
+    /**
+     * Create a new scan and clear any previously retained scan from the active
+     * storage backend.
      *
      * @param string $scanId
      * @param array $volumeIds
      * @param int $assetChunkSize
      * @return void
-     * @throws Exception
      */
-    public function initializeScan(string $scanId, array $volumeIds = [], int $assetChunkSize = self::DEFAULT_ASSET_CHUNK_SIZE): void
-    {
+    public function initializeScan(
+        string $scanId,
+        array $volumeIds = [],
+        int $assetChunkSize = self::DEFAULT_ASSET_CHUNK_SIZE
+    ): void {
         $scanId = trim($scanId);
         if ($scanId === '') {
-            throw new Exception('Missing scan ID.');
+            throw new \InvalidArgumentException('Missing scan ID.');
         }
 
-        $volumeIds = array_values(array_unique(array_map('intval', $volumeIds)));
-        $assetChunkSize = max(1, $assetChunkSize);
+        $store = $this->getStore();
+        $store->clearRetainedScans();
+        $store->initializeScan(
+            $scanId,
+            $volumeIds,
+            max(1, $assetChunkSize),
+            self::DEFAULT_ENTRY_BATCH_SIZE
+        );
+    }
 
-        $this->ensureBaseDirectories();
-
-        FileHelper::createDirectory($this->getScanPath($scanId));
-        FileHelper::createDirectory($this->getAssetsDirectory($scanId));
-        FileHelper::createDirectory($this->getUsedDirectory($scanId));
-        FileHelper::createDirectory($this->getResultsDirectory($scanId));
-
-        $now = time();
-
-        $this->writeJsonFile($this->getMetaPath($scanId), [
-            'scanId' => $scanId,
-            'createdAt' => $now,
-            'updatedAt' => $now,
-            'completedAt' => null,
-            'volumeIds' => $volumeIds,
-            'assetChunkSize' => $assetChunkSize,
-            'entryBatchSize' => self::DEFAULT_ENTRY_BATCH_SIZE,
-            'status' => self::STATUS_PENDING,
-            'stage' => self::STAGE_SETUP,
-            'totalAssets' => 0,
-            'totalChunks' => 0,
-        ]);
-
-        $this->writeJsonFile($this->getProgressPath($scanId), [
-            'status' => self::STATUS_PENDING,
-            'stage' => self::STAGE_SETUP,
-            'progress' => 0,
-            'totalAssets' => 0,
-            'processedAssets' => 0,
-            'usedCount' => 0,
-            'unusedCount' => 0,
-            'error' => null,
-            'updatedAt' => $now,
-        ]);
-
-        $this->writeJsonFile($this->getStatePath($scanId), [
-            'assetsSnapshotted' => false,
-            'relationsProcessed' => false,
-            'contentProcessed' => false,
-            'finalized' => false,
-            'usedRelationCount' => 0,
-            'usedContentCount' => 0,
-        ]);
-
-        $this->assertReadableFile($this->getMetaPath($scanId), 'scan metadata file');
-        $this->assertReadableFile($this->getProgressPath($scanId), 'scan progress file');
-        $this->assertReadableFile($this->getStatePath($scanId), 'scan state file');
-
-        Logger::debug('Initialized file-backed scan workspace.', $this->buildStorageDiagnostics($scanId));
+    /**
+     * Whether the scan still exists in the active backend.
+     *
+     * Old queued jobs may outlive the retained scan and should exit quietly.
+     *
+     * @param string $scanId
+     * @return bool
+     */
+    public function scanExists(string $scanId): bool
+    {
+        return $this->getStore()->scanExists($scanId);
     }
 
     /**
@@ -121,12 +95,7 @@ class ScanService extends Component
      */
     public function getProgress(string $scanId): ?array
     {
-        $progress = $this->readJsonFile($this->getProgressPath($scanId));
-        if (!is_array($progress)) {
-            return null;
-        }
-
-        return $progress;
+        return $this->getStore()->getProgress($scanId);
     }
 
     /**
@@ -137,8 +106,7 @@ class ScanService extends Component
      */
     public function getMeta(string $scanId): ?array
     {
-        $meta = $this->readJsonFile($this->getMetaPath($scanId));
-        return is_array($meta) ? $meta : null;
+        return $this->getStore()->getMeta($scanId);
     }
 
     /**
@@ -149,57 +117,32 @@ class ScanService extends Component
      */
     public function getResults(string $scanId): ?array
     {
-        $path = $this->getUnusedResultsPath($scanId);
-        if (!is_file($path)) {
-            return null;
-        }
-
-        $results = [];
-        foreach ($this->iterateNdjsonFile($path) as $row) {
-            if (is_array($row)) {
-                $results[] = $row;
-            }
-        }
-
-        return $results;
+        return $this->getStore()->getResults($scanId);
     }
 
     /**
-     * Whether the scan has a results file.
+     * Whether the scan has final results.
      *
      * @param string $scanId
      * @return bool
      */
     public function hasResults(string $scanId): bool
     {
-        return is_file($this->getUnusedResultsPath($scanId));
+        return $this->getStore()->hasResults($scanId);
     }
 
     /**
-     * Read last completed scan metadata.
+     * Read the latest retained completed scan metadata.
      *
      * @return array|null
      */
     public function getLastScan(): ?array
     {
-        $payload = $this->readJsonFile($this->getLastScanFilePath());
-        if (!is_array($payload)) {
-            return null;
-        }
-
-        if (empty($payload['scanId']) || empty($payload['completedAt'])) {
-            return null;
-        }
-
-        if (!$this->hasResults((string)$payload['scanId'])) {
-            return null;
-        }
-
-        return $payload;
+        return $this->getStore()->getLastScan();
     }
 
     /**
-     * Snapshot all assets in scope for the scan into chunk files.
+     * Snapshot all assets in scope for the scan into the active scan store.
      *
      * @param string $scanId
      * @return array{totalAssets:int,totalChunks:int}
@@ -207,11 +150,29 @@ class ScanService extends Component
      */
     public function snapshotAssets(string $scanId): array
     {
-        $meta = $this->requireMeta($scanId);
+        $store = $this->getStore();
+        $meta = $store->getMeta($scanId);
+
+        if ($meta === null) {
+            Logger::warning('Skipping scan setup stage because scan metadata could not be loaded.', [
+                'scanId' => $scanId,
+                'storageMode' => $this->getStorageMode(),
+            ]);
+
+            return [
+                'totalAssets' => 0,
+                'totalChunks' => 0,
+            ];
+        }
+
         $volumeIds = array_map('intval', $meta['volumeIds'] ?? []);
         $chunkSize = max(1, (int)($meta['assetChunkSize'] ?? self::DEFAULT_ASSET_CHUNK_SIZE));
 
-        $this->clearDirectory($this->getAssetsDirectory($scanId));
+        $store->resetAssetSnapshot($scanId);
+        $store->replaceUsedIds($scanId, 'relations', []);
+        $store->replaceUsedIds($scanId, 'content', []);
+        $store->replaceUsedIds($scanId, 'final', []);
+        $store->resetResults($scanId);
 
         $query = Asset::find()
             ->status(null)
@@ -226,12 +187,14 @@ class ScanService extends Component
         $currentChunk = [];
         $totalAssets = 0;
 
-        $this->updateProgress($scanId, [
+        $store->updateProgress($scanId, [
             'status' => self::STATUS_RUNNING,
             'stage' => self::STAGE_SETUP,
             'progress' => 1,
             'processedAssets' => 0,
             'totalAssets' => 0,
+            'usedCount' => 0,
+            'unusedCount' => 0,
             'error' => null,
         ]);
 
@@ -241,7 +204,7 @@ class ScanService extends Component
             $totalAssets++;
 
             if (count($currentChunk) >= $chunkSize) {
-                $this->writeAssetChunk($scanId, $chunkIndex, $currentChunk);
+                $store->storeAssetSnapshotChunk($scanId, $chunkIndex, $currentChunk);
                 $chunkIndex++;
                 $chunkCount++;
                 $currentChunk = [];
@@ -249,25 +212,25 @@ class ScanService extends Component
         }
 
         if (!empty($currentChunk)) {
-            $this->writeAssetChunk($scanId, $chunkIndex, $currentChunk);
+            $store->storeAssetSnapshotChunk($scanId, $chunkIndex, $currentChunk);
             $chunkCount++;
         }
 
-        $this->touchMeta($scanId, [
+        $store->updateMeta($scanId, [
             'status' => self::STATUS_RUNNING,
             'stage' => self::STAGE_SETUP,
             'totalAssets' => $totalAssets,
             'totalChunks' => $chunkCount,
-        ]);
-
-        $this->touchState($scanId, [
-            'assetsSnapshotted' => true,
+            'processedAssets' => 0,
+            'usedCount' => 0,
+            'unusedCount' => 0,
+            'error' => null,
         ]);
 
         $progress = $totalAssets > 0 ? 10 : 100;
         $status = $totalAssets > 0 ? self::STATUS_RUNNING : self::STATUS_COMPLETE;
 
-        $this->updateProgress($scanId, [
+        $store->updateProgress($scanId, [
             'status' => $status,
             'stage' => $totalAssets > 0 ? self::STAGE_SETUP : self::STAGE_FINALIZE,
             'progress' => $progress,
@@ -275,25 +238,40 @@ class ScanService extends Component
             'processedAssets' => 0,
             'usedCount' => 0,
             'unusedCount' => 0,
+            'error' => null,
         ]);
 
         if ($totalAssets === 0) {
-            $this->clearDirectory($this->getUsedDirectory($scanId));
-            $this->clearDirectory($this->getResultsDirectory($scanId));
-            $this->touchState($scanId, [
-                'relationsProcessed' => true,
-                'contentProcessed' => true,
-                'finalized' => true,
-                'usedRelationCount' => 0,
-                'usedContentCount' => 0,
-            ]);
-            $this->touchMeta($scanId, [
+            $completedAt = time();
+
+            $store->replaceUsedIds($scanId, 'relations', []);
+            $store->replaceUsedIds($scanId, 'content', []);
+            $store->replaceUsedIds($scanId, 'final', []);
+            $store->resetResults($scanId);
+
+            $store->updateMeta($scanId, [
                 'status' => self::STATUS_COMPLETE,
                 'stage' => self::STAGE_FINALIZE,
-                'completedAt' => time(),
+                'completedAt' => $completedAt,
+                'totalAssets' => 0,
+                'processedAssets' => 0,
+                'usedCount' => 0,
+                'unusedCount' => 0,
+                'error' => null,
             ]);
-            $this->writeEmptyResults($scanId);
-            $this->setLastScan($scanId);
+
+            $store->updateProgress($scanId, [
+                'status' => self::STATUS_COMPLETE,
+                'stage' => self::STAGE_FINALIZE,
+                'progress' => 100,
+                'totalAssets' => 0,
+                'processedAssets' => 0,
+                'usedCount' => 0,
+                'unusedCount' => 0,
+                'error' => null,
+            ]);
+
+            $store->setLastScan($scanId, $completedAt);
         }
 
         return [
@@ -303,45 +281,63 @@ class ScanService extends Component
     }
 
     /**
-     * Collect used asset IDs from the relations table in one pass over the asset chunks.
+     * Collect used asset IDs from the relations table in one pass over the
+     * stored asset snapshot.
      *
      * @param string $scanId
-     * @return int Number of unique used asset IDs found via relations.
+     * @return int
      * @throws \Throwable
      */
     public function collectRelationsUsage(string $scanId): int
     {
-        $meta = $this->requireMeta($scanId);
+        $store = $this->getStore();
+        $meta = $store->getMeta($scanId);
+
+        if ($meta === null) {
+            Logger::warning('Skipping relations stage because scan metadata could not be loaded.', [
+                'scanId' => $scanId,
+                'storageMode' => $this->getStorageMode(),
+            ]);
+
+            return 0;
+        }
+
+        $chunkSize = max(1, (int)($meta['assetChunkSize'] ?? self::DEFAULT_ASSET_CHUNK_SIZE));
         $totalChunks = max(1, (int)($meta['totalChunks'] ?? 1));
-        $chunkFiles = $this->getAssetChunkFiles($scanId);
 
         $usedIds = [];
+        $currentAssetIds = [];
+        $chunkIndex = 0;
 
-        $this->writeLines($this->getUsedRelationsPath($scanId), []);
+        $store->replaceUsedIds($scanId, 'relations', []);
 
-        foreach ($chunkFiles as $chunkIndex => $chunkFile) {
-            $assetIds = [];
-            foreach ($this->iterateNdjsonFile($chunkFile) as $row) {
-                if (is_array($row) && isset($row['id'])) {
-                    $assetIds[] = (int)$row['id'];
-                }
+        foreach ($store->iterateAssetSnapshot($scanId) as $row) {
+            if (!is_array($row) || !isset($row['id'])) {
+                continue;
             }
 
-            if (!empty($assetIds)) {
-                $relationIds = (new Query())
-                    ->select(['targetId'])
-                    ->distinct()
-                    ->from(Table::RELATIONS)
-                    ->where(['targetId' => $assetIds])
-                    ->column();
+            $currentAssetIds[] = (int)$row['id'];
 
-                foreach ($relationIds as $relationId) {
-                    $usedIds[(int)$relationId] = true;
-                }
+            if (count($currentAssetIds) >= $chunkSize) {
+                $this->collectRelationChunk($currentAssetIds, $usedIds);
+                $ratio = (++$chunkIndex) / $totalChunks;
+
+                $store->updateProgress($scanId, [
+                    'status' => self::STATUS_RUNNING,
+                    'stage' => self::STAGE_RELATIONS,
+                    'progress' => $this->scaleProgress($ratio, 10, 25),
+                    'usedCount' => count($usedIds),
+                ]);
+
+                $currentAssetIds = [];
             }
+        }
 
-            $ratio = ($chunkIndex + 1) / $totalChunks;
-            $this->updateProgress($scanId, [
+        if (!empty($currentAssetIds)) {
+            $this->collectRelationChunk($currentAssetIds, $usedIds);
+            $ratio = (++$chunkIndex) / $totalChunks;
+
+            $store->updateProgress($scanId, [
                 'status' => self::STATUS_RUNNING,
                 'stage' => self::STAGE_RELATIONS,
                 'progress' => $this->scaleProgress($ratio, 10, 25),
@@ -351,19 +347,16 @@ class ScanService extends Component
 
         $uniqueIds = array_map('intval', array_keys($usedIds));
         sort($uniqueIds, SORT_NUMERIC);
-        $this->writeLines($this->getUsedRelationsPath($scanId), $uniqueIds);
 
-        $this->touchState($scanId, [
-            'relationsProcessed' => true,
-            'usedRelationCount' => count($uniqueIds),
-        ]);
+        $store->replaceUsedIds($scanId, 'relations', $uniqueIds);
 
-        $this->touchMeta($scanId, [
+        $store->updateMeta($scanId, [
             'status' => self::STATUS_RUNNING,
             'stage' => self::STAGE_RELATIONS,
+            'usedCount' => count($uniqueIds),
         ]);
 
-        $this->updateProgress($scanId, [
+        $store->updateProgress($scanId, [
             'status' => self::STATUS_RUNNING,
             'stage' => self::STAGE_RELATIONS,
             'progress' => 25,
@@ -375,34 +368,47 @@ class ScanService extends Component
 
     /**
      * Scan relevant entry/global content and resolve asset references against
-     * the asset snapshot lookup maps.
+     * the stored asset snapshot lookup maps.
      *
      * @param string $scanId
-     * @return int Number of unique used asset IDs found via content.
+     * @return int
      * @throws \Throwable
      */
     public function collectContentUsage(string $scanId): int
     {
+        $store = $this->getStore();
+        $meta = $store->getMeta($scanId);
+
+        if ($meta === null) {
+            Logger::warning('Skipping content stage because scan metadata could not be loaded.', [
+                'scanId' => $scanId,
+                'storageMode' => $this->getStorageMode(),
+            ]);
+
+            return 0;
+        }
+
         $lookups = $this->buildAssetLookups($scanId);
         $scannedIds = $lookups['scannedIds'];
         $pathLookup = $lookups['pathLookup'];
         $filenameLookup = $lookups['filenameLookup'];
 
         $usedIds = [];
-
-        $this->writeLines($this->getUsedContentPath($scanId), []);
+        $store->replaceUsedIds($scanId, 'content', []);
 
         $htmlFields = $this->getHtmlFields();
         if (empty($htmlFields)) {
-            $this->touchState($scanId, [
-                'contentProcessed' => true,
-                'usedContentCount' => 0,
+            $store->updateMeta($scanId, [
+                'status' => self::STATUS_RUNNING,
+                'stage' => self::STAGE_CONTENT,
             ]);
-            $this->updateProgress($scanId, [
+
+            $store->updateProgress($scanId, [
                 'status' => self::STATUS_RUNNING,
                 'stage' => self::STAGE_CONTENT,
                 'progress' => 75,
             ]);
+
             return 0;
         }
 
@@ -412,7 +418,7 @@ class ScanService extends Component
         )));
         $relevantTypeIds = $this->getEntryTypeIdsWithFields($fieldIds);
 
-        $entryBatchSize = self::DEFAULT_ENTRY_BATCH_SIZE;
+        $entryBatchSize = max(1, (int)($meta['entryBatchSize'] ?? self::DEFAULT_ENTRY_BATCH_SIZE));
         $entryQuery = Entry::find()
             ->status(null)
             ->orderBy(['elements.id' => SORT_ASC]);
@@ -426,7 +432,7 @@ class ScanService extends Component
         $totalEntries = (int)$entryQuery->count();
         $processedEntries = 0;
 
-        $this->updateProgress($scanId, [
+        $store->updateProgress($scanId, [
             'status' => self::STATUS_RUNNING,
             'stage' => self::STAGE_CONTENT,
             'progress' => 25,
@@ -455,7 +461,8 @@ class ScanService extends Component
                 $processedEntries++;
                 if (($processedEntries % 25) === 0 || $processedEntries === $totalEntries) {
                     $ratio = $totalEntries > 0 ? ($processedEntries / $totalEntries) : 1.0;
-                    $this->updateProgress($scanId, [
+
+                    $store->updateProgress($scanId, [
                         'status' => self::STATUS_RUNNING,
                         'stage' => self::STAGE_CONTENT,
                         'progress' => $this->scaleProgress($ratio, 25, 70),
@@ -490,19 +497,16 @@ class ScanService extends Component
 
         $uniqueIds = array_map('intval', array_keys($usedIds));
         sort($uniqueIds, SORT_NUMERIC);
-        $this->writeLines($this->getUsedContentPath($scanId), $uniqueIds);
 
-        $this->touchState($scanId, [
-            'contentProcessed' => true,
-            'usedContentCount' => count($uniqueIds),
-        ]);
+        $store->replaceUsedIds($scanId, 'content', $uniqueIds);
 
-        $this->touchMeta($scanId, [
+        $store->updateMeta($scanId, [
             'status' => self::STATUS_RUNNING,
             'stage' => self::STAGE_CONTENT,
+            'usedCount' => count($uniqueIds),
         ]);
 
-        $this->updateProgress($scanId, [
+        $store->updateProgress($scanId, [
             'status' => self::STATUS_RUNNING,
             'stage' => self::STAGE_CONTENT,
             'progress' => 75,
@@ -513,7 +517,8 @@ class ScanService extends Component
     }
 
     /**
-     * Merge used IDs, classify the asset snapshot, and build final unused results.
+     * Merge used IDs, classify the asset snapshot, and build final unused
+     * results.
      *
      * @param string $scanId
      * @return array{usedCount:int,unusedCount:int}
@@ -521,70 +526,86 @@ class ScanService extends Component
      */
     public function finalizeScan(string $scanId): array
     {
-        $meta = $this->requireMeta($scanId);
+        $store = $this->getStore();
+        $meta = $store->getMeta($scanId);
+
+        if ($meta === null) {
+            Logger::warning('Skipping finalize stage because scan metadata could not be loaded.', [
+                'scanId' => $scanId,
+                'storageMode' => $this->getStorageMode(),
+            ]);
+
+            return [
+                'usedCount' => 0,
+                'unusedCount' => 0,
+            ];
+        }
+
         $totalAssets = (int)($meta['totalAssets'] ?? 0);
-        $usedIds = $this->readMergedUsedIds($scanId);
+        $usedIds = $store->getMergedUsedIds($scanId);
         $usedLookup = array_fill_keys($usedIds, true);
 
-        $this->writeLines($this->getUsedFinalPath($scanId), $usedIds);
-        $this->writeLines($this->getUnusedIdsPath($scanId), []);
-        $this->clearResults($scanId);
+        $store->replaceUsedIds($scanId, 'final', $usedIds);
+        $store->resetResults($scanId);
 
         $unusedIds = [];
         $processedAssets = 0;
 
-        foreach ($this->getAssetChunkFiles($scanId) as $chunkFile) {
-            foreach ($this->iterateNdjsonFile($chunkFile) as $row) {
-                if (!is_array($row) || !isset($row['id'])) {
-                    continue;
-                }
+        foreach ($store->iterateAssetSnapshot($scanId) as $row) {
+            if (!is_array($row) || !isset($row['id'])) {
+                continue;
+            }
 
-                $assetId = (int)$row['id'];
-                if (!isset($usedLookup[$assetId])) {
-                    $unusedIds[] = $assetId;
-                }
+            $assetId = (int)$row['id'];
+            if (!isset($usedLookup[$assetId])) {
+                $unusedIds[] = $assetId;
+            }
 
-                $processedAssets++;
-                if (($processedAssets % 100) === 0 || $processedAssets === $totalAssets) {
-                    $ratio = $totalAssets > 0 ? ($processedAssets / $totalAssets) : 1.0;
-                    $this->updateProgress($scanId, [
-                        'status' => self::STATUS_RUNNING,
-                        'stage' => self::STAGE_FINALIZE,
-                        'progress' => $this->scaleProgress($ratio, 75, 95),
-                        'processedAssets' => $processedAssets,
-                        'usedCount' => count($usedIds),
-                        'unusedCount' => count($unusedIds),
-                    ]);
-                }
+            $processedAssets++;
+            if (($processedAssets % 100) === 0 || $processedAssets === $totalAssets) {
+                $ratio = $totalAssets > 0 ? ($processedAssets / $totalAssets) : 1.0;
+
+                $store->updateProgress($scanId, [
+                    'status' => self::STATUS_RUNNING,
+                    'stage' => self::STAGE_FINALIZE,
+                    'progress' => $this->scaleProgress($ratio, 75, 95),
+                    'processedAssets' => $processedAssets,
+                    'usedCount' => count($usedIds),
+                    'unusedCount' => count($unusedIds),
+                ]);
             }
         }
 
-        sort($unusedIds, SORT_NUMERIC);
-        $this->writeLines($this->getUnusedIdsPath($scanId), $unusedIds);
-        $unusedCount = $this->writeUnusedResults($scanId, $unusedIds);
+        $unusedCount = 0;
+        foreach (array_chunk($unusedIds, self::DEFAULT_RESULT_QUERY_CHUNK_SIZE) as $idChunk) {
+            $rows = $this->buildUnusedAssetRows($idChunk);
+            $unusedCount += count($rows);
+            $store->appendResultRows($scanId, $rows);
+        }
 
         $completedAt = time();
 
-        $this->touchState($scanId, [
-            'finalized' => true,
-        ]);
-
-        $this->touchMeta($scanId, [
+        $store->updateMeta($scanId, [
             'status' => self::STATUS_COMPLETE,
             'stage' => self::STAGE_FINALIZE,
             'completedAt' => $completedAt,
+            'processedAssets' => $totalAssets,
+            'usedCount' => count($usedIds),
+            'unusedCount' => $unusedCount,
+            'error' => null,
         ]);
 
-        $this->updateProgress($scanId, [
+        $store->updateProgress($scanId, [
             'status' => self::STATUS_COMPLETE,
             'stage' => self::STAGE_FINALIZE,
             'progress' => 100,
             'processedAssets' => $totalAssets,
             'usedCount' => count($usedIds),
             'unusedCount' => $unusedCount,
+            'error' => null,
         ]);
 
-        $this->setLastScan($scanId, $completedAt);
+        $store->setLastScan($scanId, $completedAt);
 
         return [
             'usedCount' => count($usedIds),
@@ -602,15 +623,7 @@ class ScanService extends Component
     public function failScan(string $scanId, \Throwable|string $error): void
     {
         $message = $error instanceof \Throwable ? $error->getMessage() : (string)$error;
-
-        $this->touchMeta($scanId, [
-            'status' => self::STATUS_FAILED,
-        ]);
-
-        $this->updateProgress($scanId, [
-            'status' => self::STATUS_FAILED,
-            'error' => $message,
-        ]);
+        $this->getStore()->failScan($scanId, $message);
     }
 
     /**
@@ -631,306 +644,81 @@ class ScanService extends Component
     }
 
     /**
-     * Delete scan workspaces older than the provided age.
+     * Resolve the active scan store.
      *
-     * @param int $maxAgeSeconds
-     * @return int
+     * @return ScanStoreInterface
      */
-    public function pruneOldScans(int $maxAgeSeconds = 604800): int
+    private function getStore(): ScanStoreInterface
     {
-        $deleted = 0;
-        $root = $this->getScansRootPath();
+        $mode = $this->getStorageMode();
 
-        if (!is_dir($root)) {
-            return 0;
+        if (!isset($this->stores[$mode])) {
+            $this->stores[$mode] = match ($mode) {
+                Settings::STORAGE_MODE_DATABASE => new DbScanStore(),
+                default => new FileScanStore(),
+            };
         }
 
-        $now = time();
-        $entries = scandir($root);
-        if ($entries === false) {
-            return 0;
-        }
-
-        foreach ($entries as $entry) {
-            if ($entry === '.' || $entry === '..') {
-                continue;
-            }
-
-            $path = $root . DIRECTORY_SEPARATOR . $entry;
-            if (!is_dir($path)) {
-                continue;
-            }
-
-            $meta = $this->readJsonFile($path . DIRECTORY_SEPARATOR . 'meta.json');
-            $updatedAt = is_array($meta) ? (int)($meta['updatedAt'] ?? $meta['createdAt'] ?? 0) : 0;
-            if ($updatedAt > 0 && ($now - $updatedAt) > $maxAgeSeconds) {
-                FileHelper::removeDirectory($path);
-                $deleted++;
-            }
-        }
-
-        return $deleted;
+        return $this->stores[$mode];
     }
 
     /**
+     * Resolve the configured storage mode with config override precedence.
+     *
      * @return string
      */
-    public function getBaseStoragePath(): string
+    private function getStorageMode(): string
     {
-        $configuredPath = $this->getConfiguredWorkspacePath();
-        if ($configuredPath !== null) {
-            return $configuredPath;
+        $configMode = $this->getConfiguredStorageMode();
+        if ($configMode !== null) {
+            return $configMode;
         }
 
-        return Craft::getAlias('@storage') . DIRECTORY_SEPARATOR . 'asset-cleaner';
+        $settings = Plugin::getInstance()->getSettings();
+        if ($settings instanceof Settings && $settings->isDatabaseMode()) {
+            return Settings::STORAGE_MODE_DATABASE;
+        }
+
+        return Settings::STORAGE_MODE_FILE;
     }
 
     /**
      * @return string|null
      */
-    private function getConfiguredWorkspacePath(): ?string
+    private function getConfiguredStorageMode(): ?string
     {
-        $configuredPath = null;
+        $configuredMode = null;
 
         try {
             $config = Craft::$app->getConfig()->getConfigFromFile('asset-cleaner');
-            if (is_array($config) && isset($config['scanWorkspacePath']) && is_string($config['scanWorkspacePath'])) {
-                $configuredPath = trim($config['scanWorkspacePath']);
+            if (is_array($config) && isset($config['scanStorageMode']) && is_string($config['scanStorageMode'])) {
+                $configuredMode = trim(Craft::parseEnv($config['scanStorageMode']));
             }
         } catch (\Throwable $e) {
-            Logger::warning('Could not load Asset Cleaner config while resolving the scan workspace path.', [
+            Logger::warning('Could not load Asset Cleaner config while resolving scan storage mode.', [
                 'error' => $e->getMessage(),
             ]);
         }
 
-        $envPath = getenv('ASSET_CLEANER_SCAN_PATH');
-        if (is_string($envPath) && trim($envPath) !== '') {
-            $configuredPath = trim($envPath);
+        $envMode = getenv('ASSET_CLEANER_SCAN_STORAGE_MODE');
+        if (is_string($envMode) && trim($envMode) !== '') {
+            $configuredMode = trim($envMode);
         }
 
-        if ($configuredPath === null || $configuredPath === '') {
-            return null;
-        }
-
-        $configuredPath = Craft::parseEnv($configuredPath);
-        $resolvedAlias = Craft::getAlias($configuredPath, false);
-
-        return $resolvedAlias !== false ? $resolvedAlias : $configuredPath;
+        return in_array($configuredMode, [
+            Settings::STORAGE_MODE_FILE,
+            Settings::STORAGE_MODE_DATABASE,
+        ], true) ? $configuredMode : null;
     }
 
     /**
-     * @return string
-     */
-    public function getScansRootPath(): string
-    {
-        return $this->getBaseStoragePath() . DIRECTORY_SEPARATOR . 'scans';
-    }
-
-    /**
-     * @param string $scanId
-     * @return string
-     */
-    public function getScanPath(string $scanId): string
-    {
-        return $this->getScansRootPath() . DIRECTORY_SEPARATOR . $scanId;
-    }
-
-    /**
-     * @param string $scanId
-     * @return string
-     */
-    public function getMetaPath(string $scanId): string
-    {
-        return $this->getScanPath($scanId) . DIRECTORY_SEPARATOR . 'meta.json';
-    }
-
-    /**
-     * @param string $scanId
-     * @return string
-     */
-    public function getProgressPath(string $scanId): string
-    {
-        return $this->getScanPath($scanId) . DIRECTORY_SEPARATOR . 'progress.json';
-    }
-
-    /**
-     * @param string $scanId
-     * @return string
-     */
-    public function getStatePath(string $scanId): string
-    {
-        return $this->getScanPath($scanId) . DIRECTORY_SEPARATOR . 'state.json';
-    }
-
-    /**
-     * @param string $scanId
-     * @return string
-     */
-    public function getAssetsDirectory(string $scanId): string
-    {
-        return $this->getScanPath($scanId) . DIRECTORY_SEPARATOR . 'assets';
-    }
-
-    /**
-     * @param string $scanId
-     * @return string
-     */
-    public function getUsedDirectory(string $scanId): string
-    {
-        return $this->getScanPath($scanId) . DIRECTORY_SEPARATOR . 'used';
-    }
-
-    /**
-     * @param string $scanId
-     * @return string
-     */
-    public function getResultsDirectory(string $scanId): string
-    {
-        return $this->getScanPath($scanId) . DIRECTORY_SEPARATOR . 'results';
-    }
-
-    /**
-     * @param string $scanId
-     * @return string
-     */
-    public function getUsedRelationsPath(string $scanId): string
-    {
-        return $this->getUsedDirectory($scanId) . DIRECTORY_SEPARATOR . 'relations.txt';
-    }
-
-    /**
-     * @param string $scanId
-     * @return string
-     */
-    public function getUsedContentPath(string $scanId): string
-    {
-        return $this->getUsedDirectory($scanId) . DIRECTORY_SEPARATOR . 'content.txt';
-    }
-
-    /**
-     * @param string $scanId
-     * @return string
-     */
-    public function getUsedFinalPath(string $scanId): string
-    {
-        return $this->getUsedDirectory($scanId) . DIRECTORY_SEPARATOR . 'final.txt';
-    }
-
-    /**
-     * @param string $scanId
-     * @return string
-     */
-    public function getUnusedIdsPath(string $scanId): string
-    {
-        return $this->getResultsDirectory($scanId) . DIRECTORY_SEPARATOR . 'unused-ids.txt';
-    }
-
-    /**
-     * @param string $scanId
-     * @return string
-     */
-    public function getUnusedResultsPath(string $scanId): string
-    {
-        return $this->getResultsDirectory($scanId) . DIRECTORY_SEPARATOR . 'unused.ndjson';
-    }
-
-    /**
-     * @return string
-     */
-    private function getLastScanFilePath(): string
-    {
-        return $this->getBaseStoragePath() . DIRECTORY_SEPARATOR . self::LAST_SCAN_FILE;
-    }
-
-    /**
-     * @return void
-     * @throws Exception
-     */
-    private function ensureBaseDirectories(): void
-    {
-        $this->ensureWritableDirectory($this->getBaseStoragePath());
-        $this->ensureWritableDirectory($this->getScansRootPath());
-    }
-
-    /**
-     * @param string $scanId
-     * @return array
-     * @throws Exception
-     */
-    private function requireMeta(string $scanId): array
-    {
-        $metaPath = $this->getMetaPath($scanId);
-        $meta = $this->getMeta($scanId);
-        if ($meta === null) {
-            Logger::error('Scan metadata file is missing or unreadable.', $this->buildStorageDiagnostics($scanId));
-            throw new Exception("Scan metadata not found for '{$scanId}'. Expected metadata file at '{$metaPath}'.");
-        }
-
-        return $meta;
-    }
-
-    /**
-     * @param string|null $scanId
-     * @return array<string,mixed>
-     */
-    private function buildStorageDiagnostics(?string $scanId = null): array
-    {
-        $scanPath = $scanId !== null ? $this->getScanPath($scanId) : null;
-        $metaPath = $scanId !== null ? $this->getMetaPath($scanId) : null;
-
-        return [
-            'scanId' => $scanId,
-            'configuredWorkspacePath' => $this->getConfiguredWorkspacePath(),
-            'resolvedBaseStoragePath' => $this->getBaseStoragePath(),
-            'storageAlias' => Craft::getAlias('@storage', false),
-            'scansRootPath' => $this->getScansRootPath(),
-            'scanPath' => $scanPath,
-            'scanPathExists' => $scanPath !== null ? is_dir($scanPath) : null,
-            'metaPath' => $metaPath,
-            'metaPathExists' => $metaPath !== null ? is_file($metaPath) : null,
-            'phpSapi' => PHP_SAPI,
-            'hostname' => function_exists('gethostname') ? gethostname() : null,
-        ];
-    }
-
-    /**
-     * @param string $scanId
-     * @param array $chunk
-     * @return void
-     * @throws Exception
-     */
-    private function writeAssetChunk(string $scanId, int $chunkIndex, array $chunk): void
-    {
-        $filename = sprintf('chunk-%06d.ndjson', $chunkIndex + 1);
-        $path = $this->getAssetsDirectory($scanId) . DIRECTORY_SEPARATOR . $filename;
-
-        $this->writeNdjsonFile($path, $chunk);
-    }
-
-    /**
-     * @param string $scanId
-     * @return array<int,string>
-     */
-    private function getAssetChunkFiles(string $scanId): array
-    {
-        $directory = $this->getAssetsDirectory($scanId);
-        if (!is_dir($directory)) {
-            return [];
-        }
-
-        $files = glob($directory . DIRECTORY_SEPARATOR . 'chunk-*.ndjson') ?: [];
-        sort($files, SORT_NATURAL);
-
-        return array_values($files);
-    }
-
-    /**
+     * Build a normalized asset snapshot row.
+     *
      * @param Asset $asset
      * @return array
      */
     private function buildAssetSnapshotRecord(Asset $asset): array
     {
-        $volume = null;
         $volumeHandle = null;
         $volumePathPrefixes = [];
 
@@ -941,7 +729,6 @@ class ScanService extends Component
                 $volumePathPrefixes = $this->buildVolumePathPrefixes($volume, $volumeHandle);
             }
         } catch (\Throwable) {
-            $volume = null;
             $volumeHandle = null;
             $volumePathPrefixes = [];
         }
@@ -959,6 +746,7 @@ class ScanService extends Component
     /**
      * @param Asset $asset
      * @param string|null $volumeHandle
+     * @param array $volumePathPrefixes
      * @return array<string,string>
      */
     private function buildAssetPathCandidates(Asset $asset, ?string $volumeHandle, array $volumePathPrefixes = []): array
@@ -1030,13 +818,15 @@ class ScanService extends Component
                 }
             }
         } catch (\Throwable) {
-            // Ignore inaccessible FS metadata
+            // Ignore inaccessible FS metadata.
         }
 
         return array_values(array_unique(array_filter($prefixes, static fn($prefix) => $prefix !== '')));
     }
 
     /**
+     * Build lookup maps from the stored asset snapshot.
+     *
      * @param string $scanId
      * @return array{
      *     scannedIds: array<int,bool>,
@@ -1050,28 +840,25 @@ class ScanService extends Component
         $pathLookup = [];
         $filenameLookup = [];
 
-        foreach ($this->getAssetChunkFiles($scanId) as $chunkFile) {
-            foreach ($this->iterateNdjsonFile($chunkFile) as $row) {
-                if (!is_array($row) || !isset($row['id'])) {
-                    continue;
-                }
+        foreach ($this->getStore()->iterateAssetSnapshot($scanId) as $row) {
+            if (!is_array($row) || !isset($row['id'])) {
+                continue;
+            }
 
-                $assetId = (int)$row['id'];
-                $scannedIds[$assetId] = true;
+            $assetId = (int)$row['id'];
+            $scannedIds[$assetId] = true;
 
-                $filename = trim((string)($row['filename'] ?? ''));
-                if ($filename !== '') {
-                    $key = mb_strtolower($filename);
-                    $filenameLookup[$key] ??= [];
-                    $filenameLookup[$key][] = $assetId;
-                }
+            $filename = trim((string)($row['filename'] ?? ''));
+            if ($filename !== '') {
+                $key = mb_strtolower($filename);
+                $filenameLookup[$key] ??= [];
+                $filenameLookup[$key][] = $assetId;
+            }
 
-                foreach ((array)($row['pathCandidates'] ?? []) as $candidate) {
-                    $normalizedVariants = $this->normalizePathCandidates((string)$candidate);
-                    foreach ($normalizedVariants as $variant) {
-                        $pathLookup[$variant] ??= [];
-                        $pathLookup[$variant][] = $assetId;
-                    }
+            foreach ((array)($row['pathCandidates'] ?? []) as $candidate) {
+                foreach ($this->normalizePathCandidates((string)$candidate) as $variant) {
+                    $pathLookup[$variant] ??= [];
+                    $pathLookup[$variant][] = $assetId;
                 }
             }
         }
@@ -1266,6 +1053,8 @@ class ScanService extends Component
     }
 
     /**
+     * Normalize path candidates for URL/path matching.
+     *
      * @param string $path
      * @return array<int,string>
      */
@@ -1301,105 +1090,61 @@ class ScanService extends Component
             $variants[] = '/' . $path;
         }
 
-        $variants = array_values(array_unique(array_filter($variants, static fn($value) => $value !== '')));
-
-        return $variants;
+        return array_values(array_unique(array_filter($variants, static fn($value) => $value !== '')));
     }
 
     /**
-     * @param string $scanId
-     * @return array<int>
+     * @param array<int> $assetIds
+     * @param array<int,bool> $usedIds
+     * @return void
      */
-    private function readMergedUsedIds(string $scanId): array
+    private function collectRelationChunk(array $assetIds, array &$usedIds): void
     {
-        $used = [];
-
-        foreach ([$this->getUsedRelationsPath($scanId), $this->getUsedContentPath($scanId)] as $path) {
-            if (!is_file($path)) {
-                continue;
-            }
-
-            foreach ($this->iterateTextLines($path) as $line) {
-                $id = (int)trim($line);
-                if ($id > 0) {
-                    $used[$id] = true;
-                }
-            }
+        if (empty($assetIds)) {
+            return;
         }
 
-        $ids = array_map('intval', array_keys($used));
-        sort($ids, SORT_NUMERIC);
+        $relationIds = (new Query())
+            ->select(['targetId'])
+            ->distinct()
+            ->from(Table::RELATIONS)
+            ->where(['targetId' => $assetIds])
+            ->column();
 
-        return $ids;
+        foreach ($relationIds as $relationId) {
+            $usedIds[(int)$relationId] = true;
+        }
     }
 
     /**
-     * @param string $scanId
+     * Build final unused asset result rows for one asset ID chunk.
+     *
      * @param array<int> $unusedIds
-     * @return int
-     * @throws Exception
+     * @return array<int,array<string,mixed>>
      */
-    private function writeUnusedResults(string $scanId, array $unusedIds): int
+    private function buildUnusedAssetRows(array $unusedIds): array
     {
-        $path = $this->getUnusedResultsPath($scanId);
-        $count = 0;
-
         if (empty($unusedIds)) {
-            $this->writeNdjsonFile($path, []);
-            return 0;
+            return [];
         }
 
-        $this->ensureWritableDirectory(dirname($path));
+        $assets = Asset::find()
+            ->id($unusedIds)
+            ->status(null)
+            ->all();
 
-        $fh = fopen($path, 'wb');
-        if ($fh === false) {
-            $this->logStorageFailure('Unable to open results file for writing.', [
-                'scanId' => $scanId,
-                'path' => $path,
-            ]);
-            throw new Exception("Unable to open results file for scan '{$scanId}'.");
+        $rows = [];
+        foreach ($assets as $asset) {
+            /** @var Asset $asset */
+            $rows[] = $this->buildUnusedAssetRow($asset);
         }
 
-        try {
-            foreach (array_chunk($unusedIds, self::DEFAULT_RESULT_QUERY_CHUNK_SIZE) as $idChunk) {
-                $assets = Asset::find()
-                    ->id($idChunk)
-                    ->status(null)
-                    ->all();
-
-                foreach ($assets as $asset) {
-                    /** @var Asset $asset */
-                    $row = $this->buildUnusedAssetRow($asset);
-                    $written = fwrite($fh, Json::encode($row) . PHP_EOL);
-                    if ($written === false) {
-                        $this->logStorageFailure('Unable to write unused asset result row.', [
-                            'scanId' => $scanId,
-                            'path' => $path,
-                            'assetId' => (int)$asset->id,
-                        ]);
-                        throw new Exception("Unable to write unused asset results for scan '{$scanId}'.");
-                    }
-                    $count++;
-                }
-            }
-
-            if (!fflush($fh)) {
-                $this->logStorageFailure('Unable to flush unused asset results file.', [
-                    'scanId' => $scanId,
-                    'path' => $path,
-                ]);
-                throw new Exception("Unable to flush results file for scan '{$scanId}'.");
-            }
-        } finally {
-            fclose($fh);
-        }
-
-        $this->assertReadableFile($path, 'unused asset results file');
-
-        return $count;
+        return $rows;
     }
 
     /**
+     * Build a final unused asset result row.
+     *
      * @param Asset $asset
      * @return array<string,mixed>
      */
@@ -1430,7 +1175,7 @@ class ScanService extends Component
                     }
                 }
 
-                if (empty($path) && !empty($volume->handle)) {
+                if ($path === '' && !empty($volume->handle)) {
                     $path = '@volumes/' . $volume->handle;
                     if ($folderPath) {
                         $path .= '/' . ltrim($folderPath, '/\\');
@@ -1456,388 +1201,8 @@ class ScanService extends Component
     }
 
     /**
-     * @param string $scanId
-     * @param int|null $completedAt
-     * @return void
-     */
-    private function setLastScan(string $scanId, ?int $completedAt = null): void
-    {
-        $this->writeJsonFile($this->getLastScanFilePath(), [
-            'scanId' => $scanId,
-            'completedAt' => $completedAt ?? time(),
-        ]);
-    }
-
-    /**
-     * @param string $scanId
-     * @param array $updates
-     * @return void
-     */
-    private function updateProgress(string $scanId, array $updates): void
-    {
-        $progress = $this->getProgress($scanId) ?? [];
-        $progress = array_merge($progress, $updates, [
-            'updatedAt' => time(),
-        ]);
-
-        if (!isset($progress['stage'])) {
-            $progress['stage'] = self::STAGE_SETUP;
-        }
-
-        $this->writeJsonFile($this->getProgressPath($scanId), $progress);
-        $this->touchMeta($scanId, [
-            'updatedAt' => $progress['updatedAt'],
-            'status' => $progress['status'] ?? self::STATUS_RUNNING,
-            'stage' => $progress['stage'],
-        ]);
-    }
-
-    /**
-     * @param string $scanId
-     * @param array $updates
-     * @return void
-     */
-    private function touchMeta(string $scanId, array $updates): void
-    {
-        $meta = $this->getMeta($scanId) ?? [];
-        $meta = array_merge($meta, $updates, [
-            'updatedAt' => time(),
-        ]);
-
-        $this->writeJsonFile($this->getMetaPath($scanId), $meta);
-    }
-
-    /**
-     * @param string $scanId
-     * @param array $updates
-     * @return void
-     */
-    private function touchState(string $scanId, array $updates): void
-    {
-        $state = $this->readJsonFile($this->getStatePath($scanId));
-        $state = is_array($state) ? $state : [];
-        $state = array_merge($state, $updates);
-
-        $this->writeJsonFile($this->getStatePath($scanId), $state);
-    }
-
-    /**
-     * @param string $scanId
-     * @return void
-     */
-    private function clearResults(string $scanId): void
-    {
-        FileHelper::createDirectory($this->getResultsDirectory($scanId));
-
-        foreach ([$this->getUnusedIdsPath($scanId), $this->getUnusedResultsPath($scanId)] as $path) {
-            if (is_file($path)) {
-                @unlink($path);
-            }
-        }
-    }
-
-    /**
-     * @param string $scanId
-     * @return void
-     */
-    private function writeEmptyResults(string $scanId): void
-    {
-        $this->writeLines($this->getUsedRelationsPath($scanId), []);
-        $this->writeLines($this->getUsedContentPath($scanId), []);
-        $this->writeLines($this->getUsedFinalPath($scanId), []);
-        $this->writeLines($this->getUnusedIdsPath($scanId), []);
-        $this->writeNdjsonFile($this->getUnusedResultsPath($scanId), []);
-    }
-
-    /**
-     * @param string $directory
-     * @return void
-     */
-    private function clearDirectory(string $directory): void
-    {
-        if (is_dir($directory)) {
-            FileHelper::removeDirectory($directory);
-        }
-
-        FileHelper::createDirectory($directory);
-    }
-
-    /**
-     * @param string $path
-     * @param array $payload
-     * @return void
-     */
-    private function writeJsonFile(string $path, array $payload): void
-    {
-        $this->ensureWritableDirectory(dirname($path));
-        $json = Json::encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-        $this->writeFileAtomically($path, $json . PHP_EOL);
-    }
-
-    /**
-     * @param string $path
-     * @return mixed
-     */
-    private function readJsonFile(string $path): mixed
-    {
-        if (!is_file($path)) {
-            return null;
-        }
-
-        $contents = file_get_contents($path);
-        if ($contents === false || trim($contents) === '') {
-            return null;
-        }
-
-        try {
-            return Json::decode($contents);
-        } catch (\Throwable) {
-            return null;
-        }
-    }
-
-    /**
-     * @param string $path
-     * @param array<int,mixed> $rows
-     * @return void
-     * @throws Exception
-     */
-    private function writeNdjsonFile(string $path, array $rows): void
-    {
-        $this->ensureWritableDirectory(dirname($path));
-
-        $tmpPath = $path . '.tmp-' . bin2hex(random_bytes(6));
-        $fh = fopen($tmpPath, 'wb');
-        if ($fh === false) {
-            $this->logStorageFailure('Unable to open temporary NDJSON file for writing.', [
-                'path' => $path,
-                'tmpPath' => $tmpPath,
-            ]);
-            throw new Exception("Unable to open '{$path}' for writing.");
-        }
-
-        try {
-            foreach ($rows as $row) {
-                $written = fwrite($fh, Json::encode($row) . PHP_EOL);
-                if ($written === false) {
-                    $this->logStorageFailure('Unable to write NDJSON row to temporary scan file.', [
-                        'path' => $path,
-                        'tmpPath' => $tmpPath,
-                    ]);
-                    throw new Exception("Unable to write '{$path}'.");
-                }
-            }
-
-            if (!fflush($fh)) {
-                $this->logStorageFailure('Unable to flush temporary NDJSON scan file.', [
-                    'path' => $path,
-                    'tmpPath' => $tmpPath,
-                ]);
-                throw new Exception("Unable to flush '{$path}'.");
-            }
-        } finally {
-            fclose($fh);
-        }
-
-        if (!@rename($tmpPath, $path)) {
-            $error = error_get_last();
-            @unlink($tmpPath);
-            $this->logStorageFailure('Unable to move temporary NDJSON scan file into place.', [
-                'path' => $path,
-                'tmpPath' => $tmpPath,
-                'renameError' => $error['message'] ?? 'Unknown rename error.',
-            ]);
-            throw new Exception("Unable to finalize '{$path}' after writing.");
-        }
-
-        $this->assertReadableFile($path, 'NDJSON file');
-    }
-
-    /**
-     * @param string $path
-     * @param array<int,string|int> $lines
-     * @return void
-     */
-    private function writeLines(string $path, array $lines): void
-    {
-        $this->ensureWritableDirectory(dirname($path));
-        $content = '';
-        foreach ($lines as $line) {
-            $content .= trim((string)$line) . PHP_EOL;
-        }
-        $this->writeFileAtomically($path, $content);
-    }
-
-    /**
-     * @param string $path
-     * @param string $contents
-     * @return void
-     * @throws Exception
-     */
-    private function writeFileAtomically(string $path, string $contents): void
-    {
-        $this->ensureWritableDirectory(dirname($path));
-
-        $tmpPath = $path . '.tmp-' . bin2hex(random_bytes(6));
-        $bytesWritten = file_put_contents($tmpPath, $contents, LOCK_EX);
-        if ($bytesWritten === false) {
-            $this->logStorageFailure('Unable to write temporary scan file.', [
-                'path' => $path,
-                'tmpPath' => $tmpPath,
-            ]);
-            throw new Exception("Unable to write temporary file for '{$path}'.");
-        }
-
-        if (!@rename($tmpPath, $path)) {
-            $error = error_get_last();
-            @unlink($tmpPath);
-            $this->logStorageFailure('Unable to move temporary scan file into place.', [
-                'path' => $path,
-                'tmpPath' => $tmpPath,
-                'renameError' => $error['message'] ?? 'Unknown rename error.',
-            ]);
-            throw new Exception("Unable to finalize '{$path}' after writing.");
-        }
-
-        $this->assertReadableFile($path, 'scan file');
-    }
-
-    /**
-     * @param string $directory
-     * @return void
-     * @throws Exception
-     */
-    private function ensureWritableDirectory(string $directory): void
-    {
-        try {
-            FileHelper::createDirectory($directory);
-        } catch (\Throwable $e) {
-            $this->logStorageFailure('Unable to create scan workspace directory.', [
-                'directory' => $directory,
-                'error' => $e->getMessage(),
-            ]);
-            throw new Exception("Unable to create scan workspace directory '{$directory}': " . $e->getMessage());
-        }
-
-        clearstatcache(true, $directory);
-
-        if (!is_dir($directory)) {
-            $this->logStorageFailure('Scan workspace directory does not exist after creation attempt.', [
-                'directory' => $directory,
-            ]);
-            throw new Exception("Scan workspace directory '{$directory}' does not exist after creation.");
-        }
-
-        if (!is_writable($directory)) {
-            $this->logStorageFailure('Scan workspace directory is not writable.', [
-                'directory' => $directory,
-            ]);
-            throw new Exception("Scan workspace directory '{$directory}' is not writable.");
-        }
-    }
-
-    /**
-     * @param string $path
-     * @param string $label
-     * @return void
-     * @throws Exception
-     */
-    private function assertReadableFile(string $path, string $label): void
-    {
-        clearstatcache(true, $path);
-
-        if (!is_file($path)) {
-            $this->logStorageFailure('Expected scan file was not found after writing.', [
-                'path' => $path,
-                'label' => $label,
-            ]);
-            throw new Exception("Expected {$label} at '{$path}' but it was not found after writing.");
-        }
-
-        if (!is_readable($path)) {
-            $this->logStorageFailure('Expected scan file is not readable after writing.', [
-                'path' => $path,
-                'label' => $label,
-            ]);
-            throw new Exception("Expected {$label} at '{$path}' but it is not readable.");
-        }
-    }
-
-    /**
-     * @param string $message
-     * @param array $context
-     * @return void
-     */
-    private function logStorageFailure(string $message, array $context = []): void
-    {
-        Logger::error($message, array_merge($this->buildStorageDiagnostics(), $context));
-    }
-
-    /**
-     * @param string $path
-     * @return \Generator<int,array>
-     */
-    private function iterateNdjsonFile(string $path): \Generator
-    {
-        if (!is_file($path)) {
-            return;
-        }
-
-        $fh = fopen($path, 'rb');
-        if ($fh === false) {
-            return;
-        }
-
-        try {
-            while (($line = fgets($fh)) !== false) {
-                $line = trim($line);
-                if ($line === '') {
-                    continue;
-                }
-
-                try {
-                    $row = Json::decode($line);
-                } catch (\Throwable) {
-                    continue;
-                }
-
-                if (is_array($row)) {
-                    yield $row;
-                }
-            }
-        } finally {
-            fclose($fh);
-        }
-    }
-
-    /**
-     * @param string $path
-     * @return \Generator<int,string>
-     */
-    private function iterateTextLines(string $path): \Generator
-    {
-        if (!is_file($path)) {
-            return;
-        }
-
-        $fh = fopen($path, 'rb');
-        if ($fh === false) {
-            return;
-        }
-
-        try {
-            while (($line = fgets($fh)) !== false) {
-                $line = trim($line);
-                if ($line !== '') {
-                    yield $line;
-                }
-            }
-        } finally {
-            fclose($fh);
-        }
-    }
-
-    /**
+     * Scale progress for one stage range.
+     *
      * @param float $ratio
      * @param int $start
      * @param int $end
@@ -1846,6 +1211,7 @@ class ScanService extends Component
     private function scaleProgress(float $ratio, int $start, int $end): int
     {
         $ratio = max(0.0, min(1.0, $ratio));
+
         return (int)round($start + (($end - $start) * $ratio));
     }
 }

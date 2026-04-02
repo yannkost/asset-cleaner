@@ -33,7 +33,12 @@ class ScanFinalizeJob extends BaseJob
     public function execute($queue): void
     {
         try {
-            Plugin::getInstance()->scanService->finalizeScan($this->scanId);
+            $scanService = Plugin::getInstance()->scanService;
+            if (!$scanService->scanExists($this->scanId)) {
+                return;
+            }
+
+            $scanService->finalizeScan($this->scanId);
             $this->setProgress($queue, 1.0);
         } catch (\Throwable $e) {
             Logger::exception('Scan finalize stage failed', $e);
