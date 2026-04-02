@@ -337,6 +337,12 @@
         const includeDrafts = !!(
             includeDraftsInput && includeDraftsInput.checked
         );
+        const includeRevisionsInput = container.querySelector(
+            'input[type="checkbox"][name="includeRevisions"]',
+        );
+        const includeRevisions = !!(
+            includeRevisionsInput && includeRevisionsInput.checked
+        );
 
         // Get selected volumes
         const volumeIds = [];
@@ -375,6 +381,7 @@
                 data: {
                     volumeIds: volumeIds,
                     includeDrafts: includeDrafts,
+                    includeRevisions: includeRevisions,
                 },
             },
         )

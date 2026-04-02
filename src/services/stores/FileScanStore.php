@@ -45,7 +45,7 @@ class FileScanStore extends Component implements ScanStoreInterface
     /**
      * @inheritdoc
      */
-    public function initializeScan(string $scanId, array $volumeIds, int $assetChunkSize, int $entryBatchSize, bool $includeDrafts): void
+    public function initializeScan(string $scanId, array $volumeIds, int $assetChunkSize, int $entryBatchSize, bool $includeDrafts, bool $includeRevisions, ?int $initiatorId = null): void
     {
         $scanId = trim($scanId);
         if ($scanId === '') {
@@ -56,6 +56,7 @@ class FileScanStore extends Component implements ScanStoreInterface
         $assetChunkSize = max(1, $assetChunkSize);
         $entryBatchSize = max(1, $entryBatchSize);
         $includeDrafts = (bool)$includeDrafts;
+        $includeRevisions = (bool)$includeRevisions;
 
         $this->ensureBaseDirectories();
         $this->ensureWritableDirectory($this->getScanPath($scanId));
@@ -64,16 +65,19 @@ class FileScanStore extends Component implements ScanStoreInterface
         $this->ensureWritableDirectory($this->getResultsDirectory($scanId));
 
         $now = time();
+        $initiatingUserId = $initiatorId;
 
         $this->writeJsonFile($this->getMetaPath($scanId), [
             'scanId' => $scanId,
             'createdAt' => $now,
             'updatedAt' => $now,
             'completedAt' => null,
+            'initiatingUserId' => $initiatingUserId !== null ? (int)$initiatingUserId : null,
             'volumeIds' => $volumeIds,
             'assetChunkSize' => $assetChunkSize,
             'entryBatchSize' => $entryBatchSize,
             'includeDrafts' => $includeDrafts,
+            'includeRevisions' => $includeRevisions,
             'status' => ScanService::STATUS_PENDING,
             'stage' => ScanService::STAGE_SETUP,
             'totalAssets' => 0,

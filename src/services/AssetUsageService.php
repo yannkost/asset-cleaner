@@ -28,7 +28,7 @@ class AssetUsageService extends Component
      * @param int $assetId
      * @return array Array of usage data with entry info
      */
-    public function getAssetUsage(int $assetId, ?bool $includeDrafts = null): array
+    public function getAssetUsage(int $assetId, ?bool $includeDrafts = null, ?bool $includeRevisions = null, ?int $initiatingUserId = null): array
     {
         $usage = [
             'relations' => [],
@@ -42,18 +42,18 @@ class AssetUsageService extends Component
         }
 
         // 1. Check relations table for Asset field references
-        foreach ($this->getResolvedRelationEntries($assetId, $includeDrafts) as $entry) {
+        foreach ($this->getResolvedRelationEntries($assetId, $includeDrafts, $includeRevisions, $initiatingUserId) as $entry) {
             $usage['relations'][] = [
                 'id' => $entry->id,
                 'title' => $entry->title,
                 'url' => $entry->getCpEditUrl(),
                 'status' => $entry->getStatus(),
-                'section' => $entry->getSection()?->name ?? '',
+                'section' => $this->getSafeSectionName($entry),
             ];
         }
 
         // 2. Check content tables for Redactor/CKEditor HTML fields
-        $contentUsage = $this->findAssetInContent($asset, $includeDrafts);
+        $contentUsage = $this->findAssetInContent($asset, $includeDrafts, $includeRevisions, $initiatingUserId);
         $usage['content'] = $contentUsage;
 
         return $usage;
@@ -65,18 +65,18 @@ class AssetUsageService extends Component
      * @param int $assetId
      * @return bool
      */
-    public function isAssetUsed(int $assetId, ?bool $includeDrafts = null): bool
+    public function isAssetUsed(int $assetId, ?bool $includeDrafts = null, ?bool $includeRevisions = null, ?int $initiatingUserId = null): bool
     {
         // Check valid relation sources first. This ignores stale derivative
         // relation rows that no longer resolve to a usable top-level entry.
-        if ($this->hasResolvedRelationUsage($assetId, $includeDrafts)) {
+        if ($this->hasResolvedRelationUsage($assetId, $includeDrafts, $includeRevisions, $initiatingUserId)) {
             return true;
         }
 
         // Check content tables for richtext/CKEditor references
         $asset = Asset::find()->id($assetId)->one();
         if ($asset) {
-            $contentUsage = $this->findAssetInContent($asset, $includeDrafts);
+            $contentUsage = $this->findAssetInContent($asset, $includeDrafts, $includeRevisions, $initiatingUserId);
             if (!empty($contentUsage)) {
                 return true;
             }
@@ -89,6 +89,32 @@ class AssetUsageService extends Component
         }
 
         return false;
+    }
+
+    /**
+     * Resolve the user ID whose provisional drafts should be considered.
+     *
+     * If no explicit initiating user ID is provided, this falls back to the
+     * current authenticated control panel user when available.
+     *
+     * @param int|null $initiatingUserId
+     * @return int|null
+     */
+    private function resolveDraftCreatorUserId(?int $initiatingUserId = null): ?int
+    {
+        if ($initiatingUserId !== null && $initiatingUserId > 0) {
+            return $initiatingUserId;
+        }
+
+        try {
+            $currentUser = Craft::$app->getUser()->getIdentity();
+            return $currentUser ? (int)$currentUser->id : null;
+        } catch (\Throwable $e) {
+            Logger::warning('Could not resolve current user while resolving draft creator usage context.', [
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
     }
 
     /**
@@ -138,6 +164,52 @@ class AssetUsageService extends Component
     }
 
     /**
+     * Resolve whether revision usage should count for this check.
+     *
+     * Config/env overrides the plugin setting default.
+     *
+     * @param bool|null $includeRevisions
+     * @return bool
+     */
+    private function resolveIncludeRevisions(?bool $includeRevisions): bool
+    {
+        if ($includeRevisions !== null) {
+            return $includeRevisions;
+        }
+
+        try {
+            $config = Craft::$app->getConfig()->getConfigFromFile('asset-cleaner');
+            if (is_array($config) && array_key_exists('includeRevisionsByDefault', $config)) {
+                $configured = filter_var(
+                    Craft::parseEnv((string)$config['includeRevisionsByDefault']),
+                    FILTER_VALIDATE_BOOLEAN,
+                    FILTER_NULL_ON_FAILURE
+                );
+
+                if ($configured !== null) {
+                    return $configured;
+                }
+            }
+        } catch (\Throwable $e) {
+            Logger::warning('Could not load Asset Cleaner config while resolving revision usage defaults.', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $envValue = getenv('ASSET_CLEANER_INCLUDE_REVISIONS');
+        if (is_string($envValue) && trim($envValue) !== '') {
+            $configured = filter_var(trim($envValue), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+            if ($configured !== null) {
+                return $configured;
+            }
+        }
+
+        $settings = Plugin::getInstance()->getSettings();
+
+        return (bool)($settings->includeRevisionsByDefault ?? false);
+    }
+
+    /**
      * Resolve one entry for usage checks while applying the configured draft
      * policy. Revisions are always ignored.
      *
@@ -148,20 +220,21 @@ class AssetUsageService extends Component
      * @param bool|null $includeDrafts
      * @return Entry|null
      */
-    public function resolveUsageEntry(Entry $entry, ?bool $includeDrafts = null): ?Entry
+    public function resolveUsageEntry(Entry $entry, ?bool $includeDrafts = null, ?bool $includeRevisions = null): ?Entry
     {
         $includeDrafts = $this->resolveIncludeDrafts($includeDrafts);
+        $includeRevisions = $this->resolveIncludeRevisions($includeRevisions);
 
-        if (!$this->shouldIncludeEntryForUsage($entry, $includeDrafts)) {
+        if (!$this->shouldIncludeEntryForUsage($entry, $includeDrafts, $includeRevisions)) {
             return null;
         }
 
         $resolvedEntry = $this->resolveToTopLevelEntry($entry);
-        if (!$resolvedEntry || !$resolvedEntry->getSection()) {
+        if (!$resolvedEntry || !$this->hasUsableSection($resolvedEntry)) {
             return null;
         }
 
-        if (!$this->shouldIncludeEntryForUsage($resolvedEntry, $includeDrafts)) {
+        if (!$this->shouldIncludeEntryForUsage($resolvedEntry, $includeDrafts, $includeRevisions)) {
             return null;
         }
 
@@ -175,9 +248,9 @@ class AssetUsageService extends Component
      * @param bool $includeDrafts
      * @return bool
      */
-    private function shouldIncludeEntryForUsage(Entry $entry, bool $includeDrafts): bool
+    private function shouldIncludeEntryForUsage(Entry $entry, bool $includeDrafts, bool $includeRevisions): bool
     {
-        if (method_exists($entry, 'getIsRevision') && $entry->getIsRevision()) {
+        if (!$includeRevisions && method_exists($entry, 'getIsRevision') && $entry->getIsRevision()) {
             return false;
         }
 
@@ -615,12 +688,12 @@ class AssetUsageService extends Component
      * @param array $contentIndex Output from buildContentIndex()
      * @return bool
      */
-    public function isAssetUsedWithIndex(int $assetId, array $contentIndex, ?bool $includeDrafts = null): bool
+    public function isAssetUsedWithIndex(int $assetId, array $contentIndex, ?bool $includeDrafts = null, ?bool $includeRevisions = null, ?int $initiatingUserId = null): bool
     {
         // 1. Check valid relation sources first. This ignores stale
         // derivative relation rows that no longer resolve to a usable
         // top-level entry.
-        if ($this->hasResolvedRelationUsage($assetId, $includeDrafts)) {
+        if ($this->hasResolvedRelationUsage($assetId, $includeDrafts, $includeRevisions, $initiatingUserId)) {
             return true;
         }
 
@@ -683,9 +756,9 @@ class AssetUsageService extends Component
      * @param int $assetId
      * @return bool
      */
-    private function hasResolvedRelationUsage(int $assetId, ?bool $includeDrafts = null): bool
+    private function hasResolvedRelationUsage(int $assetId, ?bool $includeDrafts = null, ?bool $includeRevisions = null, ?int $initiatingUserId = null): bool
     {
-        return !empty($this->getResolvedRelationUsageIds([$assetId], $includeDrafts));
+        return !empty($this->getResolvedRelationUsageIds([$assetId], $includeDrafts, $includeRevisions, $initiatingUserId));
     }
 
     /**
@@ -699,7 +772,7 @@ class AssetUsageService extends Component
      * @param bool|null $includeDrafts
      * @return array<int>
      */
-    public function getResolvedRelationUsageIds(array $assetIds, ?bool $includeDrafts = null): array
+    public function getResolvedRelationUsageIds(array $assetIds, ?bool $includeDrafts = null, ?bool $includeRevisions = null, ?int $initiatingUserId = null): array
     {
         $assetIds = array_values(array_unique(array_filter(array_map('intval', $assetIds))));
         if (empty($assetIds)) {
@@ -724,7 +797,7 @@ class AssetUsageService extends Component
             }
 
             if (!array_key_exists($sourceId, $resolvedSourceCache)) {
-                $resolvedSourceCache[$sourceId] = $this->resolveRelationSourceEntry($sourceId, $includeDrafts);
+                $resolvedSourceCache[$sourceId] = $this->resolveRelationSourceEntry($sourceId, $includeDrafts, $includeRevisions, $initiatingUserId);
             }
 
             if ($resolvedSourceCache[$sourceId] instanceof Entry) {
@@ -744,7 +817,7 @@ class AssetUsageService extends Component
      * @param int $assetId
      * @return array<int, Entry>
      */
-    private function getResolvedRelationEntries(int $assetId, ?bool $includeDrafts = null): array
+    private function getResolvedRelationEntries(int $assetId, ?bool $includeDrafts = null, ?bool $includeRevisions = null, ?int $initiatingUserId = null): array
     {
         $relations = (new Query())
             ->select(['r.sourceId'])
@@ -754,7 +827,7 @@ class AssetUsageService extends Component
 
         $entries = [];
         foreach ($relations as $sourceId) {
-            $entry = $this->resolveRelationSourceEntry((int)$sourceId, $includeDrafts);
+            $entry = $this->resolveRelationSourceEntry((int)$sourceId, $includeDrafts, $includeRevisions, $initiatingUserId);
             if ($entry) {
                 $entries[$entry->id] = $entry;
             }
@@ -770,18 +843,121 @@ class AssetUsageService extends Component
      * @param bool|null $includeDrafts
      * @return Entry|null
      */
-    private function resolveRelationSourceEntry(int $sourceId, ?bool $includeDrafts = null): ?Entry
+    private function resolveRelationSourceEntry(int $sourceId, ?bool $includeDrafts = null, ?bool $includeRevisions = null, ?int $initiatingUserId = null): ?Entry
+    {
+        $entry = $this->findEntryByIdForUsage($sourceId, $includeDrafts, $includeRevisions, $initiatingUserId);
+        if (!$entry) {
+            return null;
+        }
+
+        return $this->resolveUsageEntry($entry, $includeDrafts, $includeRevisions);
+    }
+
+    /**
+     * Find an entry by element ID for usage resolution, optionally including
+     * saved drafts and provisional drafts.
+     *
+     * @param int $sourceId
+     * @param bool|null $includeDrafts
+     * @return Entry|null
+     */
+    private function findEntryByIdForUsage(int $sourceId, ?bool $includeDrafts = null, ?bool $includeRevisions = null, ?int $initiatingUserId = null): ?Entry
     {
         $entry = Entry::find()
             ->id($sourceId)
             ->status(null)
             ->one();
 
-        if (!$entry) {
-            return null;
+        if ($entry) {
+            return $entry;
         }
 
-        return $this->resolveUsageEntry($entry, $includeDrafts);
+        if ($this->resolveIncludeDrafts($includeDrafts)) {
+            $entry = Entry::find()
+                ->id($sourceId)
+                ->drafts()
+                ->savedDraftsOnly()
+                ->one();
+
+            if ($entry) {
+                return $entry;
+            }
+
+            $draftCreatorUserId = $this->resolveDraftCreatorUserId($initiatingUserId);
+            $query = Entry::find()
+                ->id($sourceId)
+                ->provisionalDrafts();
+
+            if ($draftCreatorUserId !== null) {
+                $query->draftCreator($draftCreatorUserId);
+            }
+
+            $entry = $query->one();
+            if ($entry) {
+                return $entry;
+            }
+        }
+
+        if ($this->resolveIncludeRevisions($includeRevisions)) {
+            $entry = Entry::find()
+                ->id($sourceId)
+                ->revisions()
+                ->one();
+
+            if ($entry) {
+                return $entry;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Fetch all entries that should be scanned for content usage, optionally
+     * including saved drafts and provisional drafts.
+     *
+     * @param array $relevantTypeIds
+     * @param bool|null $includeDrafts
+     * @return array<int, Entry>
+     */
+    private function getEntriesForContentUsage(array $relevantTypeIds, ?bool $includeDrafts = null, ?bool $includeRevisions = null, ?int $initiatingUserId = null): array
+    {
+        $entries = Entry::find()
+            ->typeId($relevantTypeIds)
+            ->status(null)
+            ->all();
+
+        $allEntries = [];
+        foreach ($entries as $entry) {
+            $allEntries[$entry->id] = $entry;
+        }
+
+        if ($this->resolveIncludeDrafts($includeDrafts)) {
+            foreach (Entry::find()->typeId($relevantTypeIds)->drafts()->savedDraftsOnly()->all() as $entry) {
+                $allEntries[$entry->id] = $entry;
+            }
+
+            $draftCreatorUserId = $this->resolveDraftCreatorUserId($initiatingUserId);
+            $provisionalDraftsQuery = Entry::find()
+                ->typeId($relevantTypeIds)
+                ->provisionalDrafts();
+
+            if ($draftCreatorUserId !== null) {
+                $provisionalDraftsQuery->draftCreator($draftCreatorUserId);
+            }
+
+            foreach ($provisionalDraftsQuery->all() as $entry) {
+                $allEntries[$entry->id] = $entry;
+            }
+        }
+
+        if ($this->resolveIncludeRevisions($includeRevisions)) {
+            foreach (Entry::find()->typeId($relevantTypeIds)->revisions()->all() as $entry) {
+                $allEntries[$entry->id] = $entry;
+            }
+        }
+
+        return array_values($allEntries);
     }
 
     /**
@@ -791,7 +967,7 @@ class AssetUsageService extends Component
      * @param bool|null $includeDrafts
      * @return array
      */
-    private function findAssetInContent(Asset $asset, ?bool $includeDrafts = null): array
+    private function findAssetInContent(Asset $asset, ?bool $includeDrafts = null, ?bool $includeRevisions = null, ?int $initiatingUserId = null): array
     {
         $results = [];
         $assetUrl = $asset->getUrl();
@@ -841,13 +1017,10 @@ class AssetUsageService extends Component
             return $results;
         }
 
-        $entries = Entry::find()
-            ->typeId($relevantTypeIds)
-            ->status(null)
-            ->all();
+        $entries = $this->getEntriesForContentUsage($relevantTypeIds, $includeDrafts, $includeRevisions, $initiatingUserId);
 
         foreach ($entries as $entry) {
-            $resolvedEntry = $this->resolveUsageEntry($entry, $includeDrafts);
+            $resolvedEntry = $this->resolveUsageEntry($entry, $includeDrafts, $includeRevisions);
             if (!$resolvedEntry) {
                 continue;
             }
@@ -891,7 +1064,7 @@ class AssetUsageService extends Component
                         'title' => $resolvedEntry->title,
                         'url' => $resolvedEntry->getCpEditUrl(),
                         'status' => $resolvedEntry->getStatus(),
-                        'section' => $resolvedEntry->getSection()?->name ?? '',
+                        'section' => $this->getSafeSectionName($resolvedEntry),
                         'field' => $field->name,
                     ];
                     break; // Found in this entry, no need to check other fields
@@ -920,7 +1093,7 @@ class AssetUsageService extends Component
     private function resolveToTopLevelEntry(Entry $entry): ?Entry
     {
         // If entry has a section, it's already a top-level entry
-        if ($entry->getSection()) {
+        if ($this->hasUsableSection($entry)) {
             return $entry;
         }
 
@@ -930,7 +1103,7 @@ class AssetUsageService extends Component
         $depth = 0;
         $visitedIds = [$entry->id => true];
 
-        while ($current && !$current->getSection() && $depth < $maxDepth) {
+        while ($current && !$this->hasUsableSection($current) && $depth < $maxDepth) {
             try {
                 $owner = $current->getOwner();
                 if ($owner instanceof Entry && !isset($visitedIds[$owner->id])) {
@@ -947,6 +1120,38 @@ class AssetUsageService extends Component
         }
 
         // Return the resolved entry if it has a section
-        return ($current && $current->getSection()) ? $current : null;
+        return ($current && $this->hasUsableSection($current)) ? $current : null;
+    }
+
+    /**
+     * Safely determine whether an entry resolves to a valid section.
+     *
+     * @param Entry $entry
+     * @return bool
+     */
+    private function hasUsableSection(Entry $entry): bool
+    {
+        try {
+            return $entry->getSection() !== null;
+        } catch (\Throwable $e) {
+            Craft::warning('Error resolving section for entry: ' . $e->getMessage(), __METHOD__);
+            return false;
+        }
+    }
+
+    /**
+     * Safely get an entry section name.
+     *
+     * @param Entry $entry
+     * @return string
+     */
+    private function getSafeSectionName(Entry $entry): string
+    {
+        try {
+            return $entry->getSection()?->name ?? '';
+        } catch (\Throwable $e) {
+            Craft::warning('Error resolving section name for entry: ' . $e->getMessage(), __METHOD__);
+            return '';
+        }
     }
 }

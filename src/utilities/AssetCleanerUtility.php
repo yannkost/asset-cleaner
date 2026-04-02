@@ -49,6 +49,7 @@ class AssetCleanerUtility extends Utility
         return Craft::$app->getView()->renderTemplate('asset-cleaner/_utility/index', [
             'volumes' => $volumes,
             'includeDraftsDefault' => (bool)($settings->includeDraftsByDefault ?? false),
+            'includeRevisionsDefault' => (bool)($settings->includeRevisionsByDefault ?? false),
         ]);
     }
 }

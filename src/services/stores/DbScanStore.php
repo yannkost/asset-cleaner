@@ -57,16 +57,18 @@ class DbScanStore implements ScanStoreInterface
     /**
      * @inheritdoc
      */
-    public function initializeScan(string $scanId, array $volumeIds, int $assetChunkSize, int $entryBatchSize, bool $includeDrafts = false): void
+    public function initializeScan(string $scanId, array $volumeIds, int $assetChunkSize, int $entryBatchSize, bool $includeDrafts = false, bool $includeRevisions = false, ?int $initiatorId = null): void
     {
         $now = time();
+        $normalizedVolumeIds = array_values(array_unique(array_map('intval', $volumeIds)));
+        $initiatingUserId = $initiatorId !== null ? (int)$initiatorId : null;
 
         $payload = [
             'scanId' => $scanId,
             'status' => 'pending',
             'stage' => 'setup',
             'progress' => 0,
-            'volumeIds' => Json::encode(array_values(array_unique(array_map('intval', $volumeIds)))),
+            'volumeIds' => $this->encodeVolumeIdsPayload($normalizedVolumeIds, $initiatingUserId, $includeRevisions),
             'includeDrafts' => $includeDrafts ? 1 : 0,
             'assetChunkSize' => max(1, $assetChunkSize),
             'entryBatchSize' => max(1, $entryBatchSize),
@@ -507,14 +509,17 @@ class DbScanStore implements ScanStoreInterface
     {
         $assetChunkSize = max(1, (int)($row['assetChunkSize'] ?? 100));
         $totalAssets = (int)($row['totalAssets'] ?? 0);
+        $volumeIdsPayload = $this->decodeVolumeIdsPayload($row['volumeIds'] ?? null);
 
         return [
             'scanId' => (string)$row['scanId'],
             'createdAt' => (int)($row['createdAt'] ?? 0),
             'updatedAt' => (int)($row['updatedAt'] ?? 0),
             'completedAt' => isset($row['completedAt']) ? (int)$row['completedAt'] : null,
-            'volumeIds' => $this->decodeIntArray($row['volumeIds'] ?? null),
+            'volumeIds' => $volumeIdsPayload['ids'],
+            'initiatingUserId' => $volumeIdsPayload['initiatingUserId'],
             'includeDrafts' => !empty($row['includeDrafts']),
+            'includeRevisions' => !empty($volumeIdsPayload['includeRevisions']),
             'assetChunkSize' => $assetChunkSize,
             'entryBatchSize' => max(1, (int)($row['entryBatchSize'] ?? 200)),
             'status' => (string)($row['status'] ?? 'pending'),
@@ -539,7 +544,11 @@ class DbScanStore implements ScanStoreInterface
             'status' => (string)($meta['status'] ?? 'pending'),
             'stage' => (string)($meta['stage'] ?? 'setup'),
             'progress' => (int)($meta['progress'] ?? 0),
-            'volumeIds' => Json::encode(array_values(array_unique(array_map('intval', $meta['volumeIds'] ?? [])))),
+            'volumeIds' => $this->encodeVolumeIdsPayload(
+                array_values(array_unique(array_map('intval', $meta['volumeIds'] ?? []))),
+                isset($meta['initiatingUserId']) ? (int)$meta['initiatingUserId'] : null,
+                !empty($meta['includeRevisions'])
+            ),
             'includeDrafts' => !empty($meta['includeDrafts']) ? 1 : 0,
             'assetChunkSize' => max(1, (int)($meta['assetChunkSize'] ?? 100)),
             'entryBatchSize' => max(1, (int)($meta['entryBatchSize'] ?? 200)),
@@ -590,6 +599,53 @@ class DbScanStore implements ScanStoreInterface
     }
 
     /**
+     * Encode the scan volume payload, including the initiating user ID.
+     *
+     * Stored in the existing volumeIds text column to avoid requiring an
+     * additional schema change for metadata-only information.
+     *
+     * @param array<int> $volumeIds
+     * @param int|null $initiatingUserId
+     * @param bool $includeRevisions
+     * @return string
+     */
+    private function encodeVolumeIdsPayload(array $volumeIds, ?int $initiatingUserId, bool $includeRevisions = false): string
+    {
+        return Json::encode([
+            'ids' => array_values(array_unique(array_map('intval', $volumeIds))),
+            'initiatingUserId' => $initiatingUserId,
+            'includeRevisions' => $includeRevisions,
+        ]);
+    }
+
+    /**
+     * Decode the stored scan volume payload.
+     *
+     * Supports both the new object payload and the legacy plain array payload.
+     *
+     * @param mixed $value
+     * @return array{ids: array<int>, initiatingUserId: int|null, includeRevisions: bool}
+     */
+    private function decodeVolumeIdsPayload(mixed $value): array
+    {
+        $decoded = $this->decodeJsonArray($value);
+
+        if (array_key_exists('ids', $decoded)) {
+            return [
+                'ids' => array_values(array_map('intval', (array)$decoded['ids'])),
+                'initiatingUserId' => isset($decoded['initiatingUserId']) ? (int)$decoded['initiatingUserId'] : null,
+                'includeRevisions' => !empty($decoded['includeRevisions']),
+            ];
+        }
+
+        return [
+            'ids' => array_values(array_map('intval', $decoded)),
+            'initiatingUserId' => null,
+            'includeRevisions' => false,
+        ];
+    }
+
+    /**
      * @param mixed $value
      * @return array<int>
      */
@@ -599,6 +655,8 @@ class DbScanStore implements ScanStoreInterface
 
         return array_values(array_map('intval', $decoded));
     }
+
+
 
     /**
      * @param mixed $value

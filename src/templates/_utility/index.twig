@@ -26,6 +26,14 @@
             checked: includeDraftsDefault ?? false,
         }) }}
 
+        {{ forms.checkboxField({
+            label: 'Include revisions in this scan'|t('asset-cleaner'),
+            instructions: 'When enabled, assets referenced only in revisions may be treated as used.'|t('asset-cleaner'),
+            name: 'includeRevisions',
+            value: 1,
+            checked: includeRevisionsDefault ?? false,
+        }) }}
+
         <div class="buttons">
             <button type="button" class="btn submit asset-cleaner-scan-btn">
                 {{ 'Scan Now'|t('asset-cleaner') }}

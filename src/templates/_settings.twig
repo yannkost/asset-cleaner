@@ -37,6 +37,15 @@
     errors: settings.getErrors('includeDraftsByDefault') ?? [],
 }) }}
 
+{{ forms.lightswitchField({
+    label: 'Include revisions by default'|t('asset-cleaner'),
+    instructions: 'When enabled, assets referenced only in revisions may be treated as used during scans. This value acts as the default for new scans and can be overridden per scan from the utility page. You can also override this with `includeRevisionsByDefault` in `config/asset-cleaner.php` or the `ASSET_CLEANER_INCLUDE_REVISIONS` environment variable.'|t('asset-cleaner'),
+    id: 'includeRevisionsByDefault',
+    name: 'includeRevisionsByDefault',
+    on: settings.includeRevisionsByDefault ?? false,
+    errors: settings.getErrors('includeRevisionsByDefault') ?? [],
+}) }}
+
 <div class="readable">
     <p>
         {{ 'Notes:'|t('asset-cleaner') }}
@@ -45,6 +54,6 @@
         <li>{{ 'Only the latest scan is retained for restore/export workflows.'|t('asset-cleaner') }}</li>
         <li>{{ 'When using File-based storage in multi-container setups, make sure the configured workspace path is shared between web and queue workers.'|t('asset-cleaner') }}</li>
         <li>{{ 'Config file values override these control panel settings.'|t('asset-cleaner') }}</li>
-        <li>{{ 'Draft handling can be configured globally here and overridden per scan from the utility page.'|t('asset-cleaner') }}</li>
+        <li>{{ 'Draft and revision handling can be configured globally here and overridden per scan from the utility page.'|t('asset-cleaner') }}</li>
     </ul>
 </div>

@@ -30,6 +30,11 @@ class Settings extends Model
     public bool $includeDraftsByDefault = false;
 
     /**
+     * @var bool Whether revisions should count as usage by default.
+     */
+    public bool $includeRevisionsByDefault = false;
+
+    /**
      * @inheritdoc
      */
     public function rules(): array
@@ -42,8 +47,8 @@ class Settings extends Model
             ]],
             [['scanWorkspacePath'], 'string'],
             [['scanWorkspacePath'], 'default', 'value' => null],
-            [['includeDraftsByDefault'], 'boolean'],
-            [['includeDraftsByDefault'], 'default', 'value' => false],
+            [['includeDraftsByDefault', 'includeRevisionsByDefault'], 'boolean'],
+            [['includeDraftsByDefault', 'includeRevisionsByDefault'], 'default', 'value' => false],
         ];
     }
 
@@ -56,6 +61,7 @@ class Settings extends Model
             'scanStorageMode',
             'scanWorkspacePath',
             'includeDraftsByDefault',
+            'includeRevisionsByDefault',
         ];
     }
 
@@ -81,5 +87,13 @@ class Settings extends Model
     public function shouldIncludeDraftsByDefault(): bool
     {
         return $this->includeDraftsByDefault;
+    }
+
+    /**
+     * Whether revision usage should be included by default.
+     */
+    public function shouldIncludeRevisionsByDefault(): bool
+    {
+        return $this->includeRevisionsByDefault;
     }
 }

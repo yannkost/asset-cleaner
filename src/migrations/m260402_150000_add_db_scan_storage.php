@@ -49,6 +49,7 @@ class m260402_150000_add_db_scan_storage extends Migration
             'progress' => $this->integer()->notNull()->defaultValue(0),
             'volumeIds' => $this->text(),
             'includeDrafts' => $this->boolean()->notNull()->defaultValue(false),
+            'includeRevisions' => $this->boolean()->notNull()->defaultValue(false),
             'assetChunkSize' => $this->integer()->notNull()->defaultValue(100),
             'entryBatchSize' => $this->integer()->notNull()->defaultValue(200),
             'totalAssets' => $this->integer()->notNull()->defaultValue(0),

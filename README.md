@@ -10,7 +10,7 @@ Identify and clean up unused assets in Craft CMS 5.
 - **Configurable Scan Storage** - Choose between file-based and database-based scan storage
 - **File-Backed Scan State** - Long-running scans can store progress and intermediate data under `@storage/asset-cleaner/scans/<scanId>` or a shared custom workspace path
 - **Database-Backed Scan State** - Containerized and cloud-style installs can store scan state in the database when shared filesystem access is not guaranteed
-- **Configurable Draft Handling** - Control whether draft-only usage should count during scans
+- **Configurable Draft & Revision Handling** - Control whether draft-only and revision-only usage should count during scans
 - **Large Library Friendly** - Asset snapshots are chunked and content is processed in batches for much better performance on large datasets
 - **Per-Volume Results** - Results grouped by volume with individual file counts and total sizes
 - **Export Options** - Download CSV or ZIP of unused assets with smart filenames
@@ -64,7 +64,7 @@ php craft plugin/install asset-cleaner
 
 1. Navigate to **Utilities → Asset Cleaner**
 2. Select the volumes you want to scan
-3. Choose whether to **Include drafts in this scan**
+3. Choose whether to **Include drafts in this scan** and/or **Include revisions in this scan**
 4. Click **Scan Now**
 5. Wait for the background scan to complete
 6. Review the results grouped by volume, showing:
@@ -76,7 +76,7 @@ php craft plugin/install asset-cleaner
    - **Put into Trash** - Soft delete assets
    - **Delete Permanently** - Permanently remove assets with confirmation
 
-The draft toggle on the utility page overrides the plugin's default draft-handling setting for that individual scan.
+The draft and revision toggles on the utility page override the plugin's default draft/revision handling settings for that individual scan.
 
 ### Scan stages
 
@@ -211,15 +211,15 @@ This mode is recommended for:
 
 You can switch between file-based and database-based storage in the plugin settings, and config file values can override those settings when needed.
 
-### Draft handling
+### Draft and revision handling
 
-Asset Cleaner lets you control whether assets referenced only in drafts should count as used.
+Asset Cleaner lets you control whether assets referenced only in drafts or only in revisions should count as used.
 
 There are three levels of control:
 
-- **Config override** - `includeDraftsByDefault` in `config/asset-cleaner.php` or the `ASSET_CLEANER_INCLUDE_DRAFTS` environment variable
+- **Config override** - `includeDraftsByDefault` / `includeRevisionsByDefault` in `config/asset-cleaner.php`, or the `ASSET_CLEANER_INCLUDE_DRAFTS` / `ASSET_CLEANER_INCLUDE_REVISIONS` environment variables
 - **Plugin setting** - sets the default behavior for new scans when no config override is present
-- **Utility page toggle** - lets you override that default for an individual scan
+- **Utility page toggles** - let you override those defaults for an individual scan
 
 Example config override:
 
@@ -228,10 +228,11 @@ Example config override:
 
 return [
     'includeDraftsByDefault' => '$ASSET_CLEANER_INCLUDE_DRAFTS',
+    'includeRevisionsByDefault' => '$ASSET_CLEANER_INCLUDE_REVISIONS',
 ];
 ```
 
-By default, draft-only usage is excluded unless you enable it.
+By default, draft-only and revision-only usage are excluded unless you enable them.
 
 ### Memory-efficient ZIP creation
 

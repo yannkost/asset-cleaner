@@ -54,6 +54,8 @@ class AssetCleanerController extends Controller
             $request = Craft::$app->getRequest();
             $volumeIds = $request->getBodyParam('volumeIds', []);
             $includeDraftsParam = $request->getBodyParam('includeDrafts', null);
+            $includeRevisionsParam = $request->getBodyParam('includeRevisions', null);
+            $initiatingUserId = (int)(Craft::$app->getUser()->getId() ?? 0);
 
             if (!is_array($volumeIds)) {
                 $volumeIds = [];
@@ -65,11 +67,14 @@ class AssetCleanerController extends Controller
             $includeDrafts = $includeDraftsParam === null
                 ? $scanService->getDefaultIncludeDrafts()
                 : filter_var($includeDraftsParam, FILTER_VALIDATE_BOOLEAN);
+            $includeRevisions = $includeRevisionsParam === null
+                ? $scanService->getDefaultIncludeRevisions()
+                : filter_var($includeRevisionsParam, FILTER_VALIDATE_BOOLEAN);
 
             // Generate a unique scan ID
             $scanId = uniqid('scan_', true);
 
-            $scanService->initializeScan($scanId, $volumeIds, 100, $includeDrafts);
+            $scanService->initializeScan($scanId, $volumeIds, 100, $includeDrafts, $includeRevisions, $initiatingUserId);
 
             // Push the setup job to the queue
             Craft::$app->getQueue()->push(new ScanSetupJob([

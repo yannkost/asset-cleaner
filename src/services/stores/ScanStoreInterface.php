@@ -29,9 +29,11 @@ interface ScanStoreInterface
      * @param int $assetChunkSize
      * @param int $entryBatchSize
      * @param bool $includeDrafts
+     * @param bool $includeRevisions
+     * @param int|null $initiatorId
      * @return void
      */
-    public function initializeScan(string $scanId, array $volumeIds, int $assetChunkSize, int $entryBatchSize, bool $includeDrafts): void;
+    public function initializeScan(string $scanId, array $volumeIds, int $assetChunkSize, int $entryBatchSize, bool $includeDrafts, bool $includeRevisions, ?int $initiatorId = null): void;
 
     /**
      * Whether the scan still exists in the active storage backend.
