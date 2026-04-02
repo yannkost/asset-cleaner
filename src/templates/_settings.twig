@@ -28,6 +28,15 @@
     errors: settings.getErrors('scanWorkspacePath') ?? [],
 }) }}
 
+{{ forms.lightswitchField({
+    label: 'Include drafts by default'|t('asset-cleaner'),
+    instructions: 'When enabled, assets referenced only in drafts may be treated as used during scans. This value acts as the default for new scans and can be overridden per scan from the utility page. You can also override this with `includeDraftsByDefault` in `config/asset-cleaner.php` or the `ASSET_CLEANER_INCLUDE_DRAFTS` environment variable.'|t('asset-cleaner'),
+    id: 'includeDraftsByDefault',
+    name: 'includeDraftsByDefault',
+    on: settings.includeDraftsByDefault ?? false,
+    errors: settings.getErrors('includeDraftsByDefault') ?? [],
+}) }}
+
 <div class="readable">
     <p>
         {{ 'Notes:'|t('asset-cleaner') }}
@@ -36,5 +45,6 @@
         <li>{{ 'Only the latest scan is retained for restore/export workflows.'|t('asset-cleaner') }}</li>
         <li>{{ 'When using File-based storage in multi-container setups, make sure the configured workspace path is shared between web and queue workers.'|t('asset-cleaner') }}</li>
         <li>{{ 'Config file values override these control panel settings.'|t('asset-cleaner') }}</li>
+        <li>{{ 'Draft handling can be configured globally here and overridden per scan from the utility page.'|t('asset-cleaner') }}</li>
     </ul>
 </div>

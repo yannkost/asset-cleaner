@@ -7,7 +7,6 @@ namespace yann\assetcleaner\services;
 use Craft;
 use craft\base\Component;
 use craft\db\Query;
-use craft\db\Table;
 use craft\elements\Asset;
 use craft\elements\Entry;
 use craft\elements\GlobalSet;
@@ -57,7 +56,8 @@ class ScanService extends Component
     public function initializeScan(
         string $scanId,
         array $volumeIds = [],
-        int $assetChunkSize = self::DEFAULT_ASSET_CHUNK_SIZE
+        int $assetChunkSize = self::DEFAULT_ASSET_CHUNK_SIZE,
+        bool $includeDrafts = false
     ): void {
         $scanId = trim($scanId);
         if ($scanId === '') {
@@ -70,7 +70,8 @@ class ScanService extends Component
             $scanId,
             $volumeIds,
             max(1, $assetChunkSize),
-            self::DEFAULT_ENTRY_BATCH_SIZE
+            self::DEFAULT_ENTRY_BATCH_SIZE,
+            $includeDrafts
         );
     }
 
@@ -85,6 +86,27 @@ class ScanService extends Component
     public function scanExists(string $scanId): bool
     {
         return $this->getStore()->scanExists($scanId);
+    }
+
+    /**
+     * Resolve the default draft-inclusion policy for new scans.
+     *
+     * Config overrides the plugin setting.
+     *
+     * @return bool
+     */
+    public function getDefaultIncludeDrafts(): bool
+    {
+        $configuredValue = $this->getConfiguredIncludeDrafts();
+        if ($configuredValue !== null) {
+            return $configuredValue;
+        }
+
+        $settings = Plugin::getInstance()->getSettings();
+
+        return $settings instanceof Settings
+            ? $settings->shouldIncludeDraftsByDefault()
+            : false;
     }
 
     /**
@@ -304,6 +326,7 @@ class ScanService extends Component
 
         $chunkSize = max(1, (int)($meta['assetChunkSize'] ?? self::DEFAULT_ASSET_CHUNK_SIZE));
         $totalChunks = max(1, (int)($meta['totalChunks'] ?? 1));
+        $includeDrafts = !empty($meta['includeDrafts']);
 
         $usedIds = [];
         $currentAssetIds = [];
@@ -319,7 +342,7 @@ class ScanService extends Component
             $currentAssetIds[] = (int)$row['id'];
 
             if (count($currentAssetIds) >= $chunkSize) {
-                $this->collectRelationChunk($currentAssetIds, $usedIds);
+                $this->collectRelationChunk($currentAssetIds, $usedIds, $includeDrafts);
                 $ratio = (++$chunkIndex) / $totalChunks;
 
                 $store->updateProgress($scanId, [
@@ -334,7 +357,7 @@ class ScanService extends Component
         }
 
         if (!empty($currentAssetIds)) {
-            $this->collectRelationChunk($currentAssetIds, $usedIds);
+            $this->collectRelationChunk($currentAssetIds, $usedIds, $includeDrafts);
             $ratio = (++$chunkIndex) / $totalChunks;
 
             $store->updateProgress($scanId, [
@@ -387,6 +410,8 @@ class ScanService extends Component
 
             return 0;
         }
+
+        $includeDrafts = !empty($meta['includeDrafts']);
 
         $lookups = $this->buildAssetLookups($scanId);
         $scannedIds = $lookups['scannedIds'];
@@ -441,6 +466,21 @@ class ScanService extends Component
         if ($totalEntries > 0) {
             foreach ($entryQuery->each($entryBatchSize) as $entry) {
                 /** @var Entry $entry */
+                if ($this->resolveUsageEntryForContent($entry, $includeDrafts) === null) {
+                    $processedEntries++;
+                    if (($processedEntries % 25) === 0 || $processedEntries === $totalEntries) {
+                        $ratio = $totalEntries > 0 ? ($processedEntries / $totalEntries) : 1.0;
+
+                        $store->updateProgress($scanId, [
+                            'status' => self::STATUS_RUNNING,
+                            'stage' => self::STAGE_CONTENT,
+                            'progress' => $this->scaleProgress($ratio, 25, 70),
+                            'usedCount' => count($usedIds),
+                        ]);
+                    }
+                    continue;
+                }
+
                 foreach ($htmlFields as $field) {
                     try {
                         $fieldValue = $entry->getFieldValue($field->handle);
@@ -709,6 +749,46 @@ class ScanService extends Component
             Settings::STORAGE_MODE_FILE,
             Settings::STORAGE_MODE_DATABASE,
         ], true) ? $configuredMode : null;
+    }
+
+    /**
+     * Resolve the configured default draft-inclusion policy, if any.
+     *
+     * Supported sources:
+     * - config/asset-cleaner.php => includeDraftsByDefault
+     * - ASSET_CLEANER_INCLUDE_DRAFTS environment variable
+     *
+     * @return bool|null
+     */
+    private function getConfiguredIncludeDrafts(): ?bool
+    {
+        $configuredValue = null;
+
+        try {
+            $config = Craft::$app->getConfig()->getConfigFromFile('asset-cleaner');
+            if (is_array($config) && array_key_exists('includeDraftsByDefault', $config)) {
+                $configuredValue = filter_var(
+                    Craft::parseEnv((string)$config['includeDraftsByDefault']),
+                    FILTER_VALIDATE_BOOLEAN,
+                    FILTER_NULL_ON_FAILURE
+                );
+            }
+        } catch (\Throwable $e) {
+            Logger::warning('Could not load Asset Cleaner config while resolving draft inclusion defaults.', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $envValue = getenv('ASSET_CLEANER_INCLUDE_DRAFTS');
+        if (is_string($envValue) && trim($envValue) !== '') {
+            $configuredValue = filter_var(
+                trim($envValue),
+                FILTER_VALIDATE_BOOLEAN,
+                FILTER_NULL_ON_FAILURE
+            );
+        }
+
+        return $configuredValue;
     }
 
     /**
@@ -1098,22 +1178,125 @@ class ScanService extends Component
      * @param array<int,bool> $usedIds
      * @return void
      */
-    private function collectRelationChunk(array $assetIds, array &$usedIds): void
+    private function collectRelationChunk(array $assetIds, array &$usedIds, bool $includeDrafts): void
     {
         if (empty($assetIds)) {
             return;
         }
 
-        $relationIds = (new Query())
-            ->select(['targetId'])
-            ->distinct()
-            ->from(Table::RELATIONS)
-            ->where(['targetId' => $assetIds])
-            ->column();
+        $relationIds = Plugin::getInstance()
+            ->assetUsage
+            ->getResolvedRelationUsageIds($assetIds, $includeDrafts);
 
         foreach ($relationIds as $relationId) {
             $usedIds[(int)$relationId] = true;
         }
+    }
+
+    /**
+     * Determine whether the given entry should contribute content usage to the
+     * current scan.
+     *
+     * When draft usage is disabled, drafts and provisional drafts are skipped.
+     * Revisions are always skipped.
+     *
+     * @param Entry $entry
+     * @param bool $includeDrafts
+     * @return bool
+     */
+    private function shouldScanEntryContent(Entry $entry, bool $includeDrafts): bool
+    {
+        return $this->resolveUsageEntryForContent($entry, $includeDrafts) !== null;
+    }
+
+    /**
+     * Resolve an entry for content-based usage checks while applying the same
+     * top-level entry resolution and draft policy used by the asset usage
+     * service.
+     *
+     * @param Entry $entry
+     * @param bool $includeDrafts
+     * @return Entry|null
+     */
+    private function resolveUsageEntryForContent(Entry $entry, bool $includeDrafts): ?Entry
+    {
+        if (!$this->shouldIncludeEntryForContent($entry, $includeDrafts)) {
+            return null;
+        }
+
+        $resolvedEntry = $this->resolveToTopLevelEntryForContent($entry);
+        if (!$resolvedEntry || !$resolvedEntry->getSection()) {
+            return null;
+        }
+
+        if (!$this->shouldIncludeEntryForContent($resolvedEntry, $includeDrafts)) {
+            return null;
+        }
+
+        return $resolvedEntry;
+    }
+
+    /**
+     * Determine whether a single entry state should count toward content usage.
+     *
+     * @param Entry $entry
+     * @param bool $includeDrafts
+     * @return bool
+     */
+    private function shouldIncludeEntryForContent(Entry $entry, bool $includeDrafts): bool
+    {
+        if (method_exists($entry, 'getIsRevision') && $entry->getIsRevision()) {
+            return false;
+        }
+
+        if (!$includeDrafts) {
+            if (method_exists($entry, 'getIsDraft') && $entry->getIsDraft()) {
+                return false;
+            }
+
+            if (method_exists($entry, 'getIsProvisionalDraft') && $entry->getIsProvisionalDraft()) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Resolve a nested entry to its top-level entry for content filtering.
+     *
+     * @param Entry $entry
+     * @return Entry|null
+     */
+    private function resolveToTopLevelEntryForContent(Entry $entry): ?Entry
+    {
+        if ($entry->getSection()) {
+            return $entry;
+        }
+
+        $current = $entry;
+        $maxDepth = 10;
+        $depth = 0;
+        $visitedIds = [$entry->id => true];
+
+        while ($current && !$current->getSection() && $depth < $maxDepth) {
+            try {
+                $owner = $current->getOwner();
+                if ($owner instanceof Entry && !isset($visitedIds[$owner->id])) {
+                    $visitedIds[$owner->id] = true;
+                    $current = $owner;
+                } else {
+                    break;
+                }
+            } catch (\Throwable $e) {
+                Craft::warning('Error getting owner for entry during scan content filtering: ' . $e->getMessage(), __METHOD__);
+                break;
+            }
+
+            $depth++;
+        }
+
+        return ($current && $current->getSection()) ? $current : null;
     }
 
     /**

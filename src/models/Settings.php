@@ -25,6 +25,11 @@ class Settings extends Model
     public ?string $scanWorkspacePath = null;
 
     /**
+     * @var bool Whether drafts should count as usage by default.
+     */
+    public bool $includeDraftsByDefault = false;
+
+    /**
      * @inheritdoc
      */
     public function rules(): array
@@ -37,6 +42,8 @@ class Settings extends Model
             ]],
             [['scanWorkspacePath'], 'string'],
             [['scanWorkspacePath'], 'default', 'value' => null],
+            [['includeDraftsByDefault'], 'boolean'],
+            [['includeDraftsByDefault'], 'default', 'value' => false],
         ];
     }
 
@@ -48,6 +55,7 @@ class Settings extends Model
         return [
             'scanStorageMode',
             'scanWorkspacePath',
+            'includeDraftsByDefault',
         ];
     }
 
@@ -65,5 +73,13 @@ class Settings extends Model
     public function isDatabaseMode(): bool
     {
         return $this->scanStorageMode === self::STORAGE_MODE_DATABASE;
+    }
+
+    /**
+     * Whether draft usage should be included by default.
+     */
+    public function shouldIncludeDraftsByDefault(): bool
+    {
+        return $this->includeDraftsByDefault;
     }
 }

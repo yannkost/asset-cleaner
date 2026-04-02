@@ -331,6 +331,12 @@
         const loadingText = loading.querySelector(".loading-text");
         const queueHint = container.querySelector(".asset-cleaner-queue-hint");
         const scanBtn = container.querySelector(".asset-cleaner-scan-btn");
+        const includeDraftsInput = container.querySelector(
+            'input[type="checkbox"][name="includeDrafts"]',
+        );
+        const includeDrafts = !!(
+            includeDraftsInput && includeDraftsInput.checked
+        );
 
         // Get selected volumes
         const volumeIds = [];
@@ -366,7 +372,10 @@
             "POST",
             "asset-cleaner/asset-cleaner/start-scan",
             {
-                data: { volumeIds: volumeIds },
+                data: {
+                    volumeIds: volumeIds,
+                    includeDrafts: includeDrafts,
+                },
             },
         )
             .then(function (response) {

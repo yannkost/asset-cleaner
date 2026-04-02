@@ -13,6 +13,7 @@ use craft\elements\Entry;
 use craft\elements\GlobalSet;
 use craft\fields\Assets as AssetsField;
 use yann\assetcleaner\helpers\Logger;
+use yann\assetcleaner\Plugin;
 
 /**
  * Asset Usage Service
@@ -27,7 +28,7 @@ class AssetUsageService extends Component
      * @param int $assetId
      * @return array Array of usage data with entry info
      */
-    public function getAssetUsage(int $assetId): array
+    public function getAssetUsage(int $assetId, ?bool $includeDrafts = null): array
     {
         $usage = [
             'relations' => [],
@@ -41,40 +42,18 @@ class AssetUsageService extends Component
         }
 
         // 1. Check relations table for Asset field references
-        $relations = (new Query())
-            ->select(['r.sourceId'])
-            ->from(['r' => Table::RELATIONS])
-            ->where(['r.targetId' => $assetId])
-            ->column();
-
-        $seenIds = [];
-        foreach ($relations as $sourceId) {
-            $entry = Entry::find()
-                ->id($sourceId)
-                ->status(null)
-                ->one();
-
-            if (!$entry) {
-                continue;
-            }
-
-            // Resolve to top-level entry if this is a nested entry (e.g., Matrix block)
-            $entry = $this->resolveToTopLevelEntry($entry);
-
-            if ($entry && $entry->getSection() && !isset($seenIds[$entry->id])) {
-                $seenIds[$entry->id] = true;
-                $usage['relations'][] = [
-                    'id' => $entry->id,
-                    'title' => $entry->title,
-                    'url' => $entry->getCpEditUrl(),
-                    'status' => $entry->getStatus(),
-                    'section' => $entry->getSection()?->name ?? '',
-                ];
-            }
+        foreach ($this->getResolvedRelationEntries($assetId, $includeDrafts) as $entry) {
+            $usage['relations'][] = [
+                'id' => $entry->id,
+                'title' => $entry->title,
+                'url' => $entry->getCpEditUrl(),
+                'status' => $entry->getStatus(),
+                'section' => $entry->getSection()?->name ?? '',
+            ];
         }
 
         // 2. Check content tables for Redactor/CKEditor HTML fields
-        $contentUsage = $this->findAssetInContent($asset);
+        $contentUsage = $this->findAssetInContent($asset, $includeDrafts);
         $usage['content'] = $contentUsage;
 
         return $usage;
@@ -86,26 +65,22 @@ class AssetUsageService extends Component
      * @param int $assetId
      * @return bool
      */
-    public function isAssetUsed(int $assetId): bool
+    public function isAssetUsed(int $assetId, ?bool $includeDrafts = null): bool
     {
-        // Check relations table first (fastest) - this covers Asset fields in entries, globals, categories, etc.
-        $hasRelation = (new Query())
-            ->from(Table::RELATIONS)
-            ->where(['targetId' => $assetId])
-            ->exists();
-
-        if ($hasRelation) {
+        // Check valid relation sources first. This ignores stale derivative
+        // relation rows that no longer resolve to a usable top-level entry.
+        if ($this->hasResolvedRelationUsage($assetId, $includeDrafts)) {
             return true;
         }
 
         // Check content tables for richtext/CKEditor references
         $asset = Asset::find()->id($assetId)->one();
         if ($asset) {
-            $contentUsage = $this->findAssetInContent($asset);
+            $contentUsage = $this->findAssetInContent($asset, $includeDrafts);
             if (!empty($contentUsage)) {
                 return true;
             }
-            
+
             // Check global sets for asset references in richtext fields
             $globalUsage = $this->findAssetInGlobals($asset);
             if (!empty($globalUsage)) {
@@ -115,7 +90,110 @@ class AssetUsageService extends Component
 
         return false;
     }
-    
+
+    /**
+     * Resolve whether draft usage should count for this check.
+     *
+     * Config/env overrides the plugin setting default.
+     *
+     * @param bool|null $includeDrafts
+     * @return bool
+     */
+    private function resolveIncludeDrafts(?bool $includeDrafts): bool
+    {
+        if ($includeDrafts !== null) {
+            return $includeDrafts;
+        }
+
+        try {
+            $config = Craft::$app->getConfig()->getConfigFromFile('asset-cleaner');
+            if (is_array($config) && array_key_exists('includeDraftsByDefault', $config)) {
+                $configured = filter_var(
+                    Craft::parseEnv((string)$config['includeDraftsByDefault']),
+                    FILTER_VALIDATE_BOOLEAN,
+                    FILTER_NULL_ON_FAILURE
+                );
+
+                if ($configured !== null) {
+                    return $configured;
+                }
+            }
+        } catch (\Throwable $e) {
+            Logger::warning('Could not load Asset Cleaner config while resolving draft usage defaults.', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $envValue = getenv('ASSET_CLEANER_INCLUDE_DRAFTS');
+        if (is_string($envValue) && trim($envValue) !== '') {
+            $configured = filter_var(trim($envValue), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+            if ($configured !== null) {
+                return $configured;
+            }
+        }
+
+        $settings = Plugin::getInstance()->getSettings();
+
+        return (bool)($settings->includeDraftsByDefault ?? false);
+    }
+
+    /**
+     * Resolve one entry for usage checks while applying the configured draft
+     * policy. Revisions are always ignored.
+     *
+     * This is used both by the asset usage inspector and by batch scan logic so
+     * they apply the same draft-aware entry resolution rules.
+     *
+     * @param Entry $entry
+     * @param bool|null $includeDrafts
+     * @return Entry|null
+     */
+    public function resolveUsageEntry(Entry $entry, ?bool $includeDrafts = null): ?Entry
+    {
+        $includeDrafts = $this->resolveIncludeDrafts($includeDrafts);
+
+        if (!$this->shouldIncludeEntryForUsage($entry, $includeDrafts)) {
+            return null;
+        }
+
+        $resolvedEntry = $this->resolveToTopLevelEntry($entry);
+        if (!$resolvedEntry || !$resolvedEntry->getSection()) {
+            return null;
+        }
+
+        if (!$this->shouldIncludeEntryForUsage($resolvedEntry, $includeDrafts)) {
+            return null;
+        }
+
+        return $resolvedEntry;
+    }
+
+    /**
+     * Determine whether an entry state should count toward asset usage.
+     *
+     * @param Entry $entry
+     * @param bool $includeDrafts
+     * @return bool
+     */
+    private function shouldIncludeEntryForUsage(Entry $entry, bool $includeDrafts): bool
+    {
+        if (method_exists($entry, 'getIsRevision') && $entry->getIsRevision()) {
+            return false;
+        }
+
+        if (!$includeDrafts) {
+            if (method_exists($entry, 'getIsDraft') && $entry->getIsDraft()) {
+                return false;
+            }
+
+            if (method_exists($entry, 'getIsProvisionalDraft') && $entry->getIsProvisionalDraft()) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     /**
      * Find asset references in global sets
      *
@@ -126,7 +204,7 @@ class AssetUsageService extends Component
     {
         $results = [];
         $assetUrl = $asset->getUrl();
-        
+
         $searchPatterns = [$asset->filename];
         if ($assetUrl) {
             $searchPatterns[] = $assetUrl;
@@ -135,29 +213,29 @@ class AssetUsageService extends Component
                 $searchPatterns[] = $parsedUrl['path'];
             }
         }
-        
+
         $globalSets = GlobalSet::find()->all();
-        
+
         foreach ($globalSets as $globalSet) {
             $fieldLayout = $globalSet->getFieldLayout();
             if (!$fieldLayout) {
                 continue;
             }
-            
+
             foreach ($fieldLayout->getCustomFields() as $field) {
                 $fieldClass = get_class($field);
                 if (!in_array($fieldClass, ['craft\\redactor\\Field', 'craft\\ckeditor\\Field'], true)) {
                     continue;
                 }
-                
+
                 $fieldValue = $globalSet->getFieldValue($field->handle);
-                
+
                 if ($fieldValue instanceof \craft\redactor\FieldData) {
                     $fieldValue = $fieldValue->getRawContent();
                 } elseif (is_object($fieldValue) && method_exists($fieldValue, '__toString')) {
                     $fieldValue = (string)$fieldValue;
                 }
-                
+
                 if ($fieldValue && is_string($fieldValue)) {
                     $found = false;
                     foreach ($searchPatterns as $pattern) {
@@ -181,7 +259,7 @@ class AssetUsageService extends Component
                 }
             }
         }
-        
+
         return $results;
     }
 
@@ -275,7 +353,7 @@ class AssetUsageService extends Component
             $path = '';
             $folder = null;
             $folderPath = '';
-            
+
             // Get folder path
             try {
                 $folder = $asset->getFolder();
@@ -285,7 +363,7 @@ class AssetUsageService extends Component
             } catch (\Throwable $e) {
                 // Folder might not be accessible
             }
-            
+
             // Get volume and build path
             try {
                 $volume = $asset->getVolume();
@@ -301,7 +379,7 @@ class AssetUsageService extends Component
                             }
                         }
                     }
-                    
+
                     // If no root path, use volume handle format
                     if (empty($path) && $volume->handle) {
                         $path = '@volumes/' . $volume->handle;
@@ -313,7 +391,7 @@ class AssetUsageService extends Component
             } catch (\Throwable $e) {
                 // Volume might not be accessible
             }
-            
+
             $result[] = [
                 'id' => $asset->id,
                 'title' => $asset->title,
@@ -537,15 +615,12 @@ class AssetUsageService extends Component
      * @param array $contentIndex Output from buildContentIndex()
      * @return bool
      */
-    public function isAssetUsedWithIndex(int $assetId, array $contentIndex): bool
+    public function isAssetUsedWithIndex(int $assetId, array $contentIndex, ?bool $includeDrafts = null): bool
     {
-        // 1. Check relations table first (fastest)
-        $hasRelation = (new Query())
-            ->from(Table::RELATIONS)
-            ->where(['targetId' => $assetId])
-            ->exists();
-
-        if ($hasRelation) {
+        // 1. Check valid relation sources first. This ignores stale
+        // derivative relation rows that no longer resolve to a usable
+        // top-level entry.
+        if ($this->hasResolvedRelationUsage($assetId, $includeDrafts)) {
             return true;
         }
 
@@ -599,12 +674,124 @@ class AssetUsageService extends Component
     }
 
     /**
+     * Determine whether an asset has any valid relation usage.
+     *
+     * This intentionally ignores stale derivative sources such as old nested
+     * elements, drafts, or revisions that leave relation rows behind but no
+     * longer resolve to a top-level entry.
+     *
+     * @param int $assetId
+     * @return bool
+     */
+    private function hasResolvedRelationUsage(int $assetId, ?bool $includeDrafts = null): bool
+    {
+        return !empty($this->getResolvedRelationUsageIds([$assetId], $includeDrafts));
+    }
+
+    /**
+     * Resolve relation usage for a batch of asset IDs.
+     *
+     * This returns only asset IDs whose relation rows can be resolved back to
+     * a real top-level entry, which makes it suitable for batch scans that
+     * should ignore stale derivative relation rows.
+     *
+     * @param array<int> $assetIds
+     * @param bool|null $includeDrafts
+     * @return array<int>
+     */
+    public function getResolvedRelationUsageIds(array $assetIds, ?bool $includeDrafts = null): array
+    {
+        $assetIds = array_values(array_unique(array_filter(array_map('intval', $assetIds))));
+        if (empty($assetIds)) {
+            return [];
+        }
+
+        $relations = (new Query())
+            ->select(['r.targetId', 'r.sourceId'])
+            ->from(['r' => Table::RELATIONS])
+            ->where(['r.targetId' => $assetIds])
+            ->all();
+
+        $usedAssetIds = [];
+        $resolvedSourceCache = [];
+
+        foreach ($relations as $relation) {
+            $sourceId = (int)($relation['sourceId'] ?? 0);
+            $targetId = (int)($relation['targetId'] ?? 0);
+
+            if ($sourceId <= 0 || $targetId <= 0) {
+                continue;
+            }
+
+            if (!array_key_exists($sourceId, $resolvedSourceCache)) {
+                $resolvedSourceCache[$sourceId] = $this->resolveRelationSourceEntry($sourceId, $includeDrafts);
+            }
+
+            if ($resolvedSourceCache[$sourceId] instanceof Entry) {
+                $usedAssetIds[$targetId] = true;
+            }
+        }
+
+        $result = array_map('intval', array_keys($usedAssetIds));
+        sort($result, SORT_NUMERIC);
+
+        return $result;
+    }
+
+    /**
+     * Resolve relation sources for an asset to unique top-level entries.
+     *
+     * @param int $assetId
+     * @return array<int, Entry>
+     */
+    private function getResolvedRelationEntries(int $assetId, ?bool $includeDrafts = null): array
+    {
+        $relations = (new Query())
+            ->select(['r.sourceId'])
+            ->from(['r' => Table::RELATIONS])
+            ->where(['r.targetId' => $assetId])
+            ->column();
+
+        $entries = [];
+        foreach ($relations as $sourceId) {
+            $entry = $this->resolveRelationSourceEntry((int)$sourceId, $includeDrafts);
+            if ($entry) {
+                $entries[$entry->id] = $entry;
+            }
+        }
+
+        return array_values($entries);
+    }
+
+    /**
+     * Resolve one relation source ID to a top-level entry when possible.
+     *
+     * @param int $sourceId
+     * @param bool|null $includeDrafts
+     * @return Entry|null
+     */
+    private function resolveRelationSourceEntry(int $sourceId, ?bool $includeDrafts = null): ?Entry
+    {
+        $entry = Entry::find()
+            ->id($sourceId)
+            ->status(null)
+            ->one();
+
+        if (!$entry) {
+            return null;
+        }
+
+        return $this->resolveUsageEntry($entry, $includeDrafts);
+    }
+
+    /**
      * Find asset references in content fields (Redactor/CKEditor)
      *
      * @param Asset $asset
+     * @param bool|null $includeDrafts
      * @return array
      */
-    private function findAssetInContent(Asset $asset): array
+    private function findAssetInContent(Asset $asset, ?bool $includeDrafts = null): array
     {
         $results = [];
         $assetUrl = $asset->getUrl();
@@ -613,7 +800,7 @@ class AssetUsageService extends Component
         $searchPatterns = [
             $asset->filename,
         ];
-        
+
         if ($assetUrl) {
             $searchPatterns[] = $assetUrl;
             // Also check for relative URL path (e.g., /volumes/files/pdfs/file.pdf)
@@ -622,7 +809,7 @@ class AssetUsageService extends Component
                 $searchPatterns[] = $parsedUrl['path'];
             }
         }
-        
+
         // Add the folder path + filename pattern
         $folderPath = $asset->folderPath ?? '';
         if ($folderPath) {
@@ -642,7 +829,7 @@ class AssetUsageService extends Component
                 $htmlFields[] = $field;
             }
         }
-        
+
         if (empty($htmlFields)) {
             return $results;
         }
@@ -660,24 +847,29 @@ class AssetUsageService extends Component
             ->all();
 
         foreach ($entries as $entry) {
+            $resolvedEntry = $this->resolveUsageEntry($entry, $includeDrafts);
+            if (!$resolvedEntry) {
+                continue;
+            }
+
             foreach ($htmlFields as $field) {
                 try {
                     $fieldValue = $entry->getFieldValue($field->handle);
                 } catch (\Throwable $e) {
                     continue;
                 }
-                
+
                 // Handle different field value types
                 if ($fieldValue instanceof \craft\redactor\FieldData) {
                     $fieldValue = $fieldValue->getRawContent();
                 } elseif (is_object($fieldValue) && method_exists($fieldValue, '__toString')) {
                     $fieldValue = (string)$fieldValue;
                 }
-                
+
                 if (!$fieldValue || !is_string($fieldValue)) {
                     continue;
                 }
-                
+
                 // Check for asset URL, path, data-asset-id attribute, or filename
                 $found = false;
                 foreach ($searchPatterns as $pattern) {
@@ -686,26 +878,22 @@ class AssetUsageService extends Component
                         break;
                     }
                 }
-                
+
                 if (!$found) {
                     // Also check for data-asset-id attribute and #asset:ID fragment (CKEditor/Redactor)
                     $found = str_contains($fieldValue, 'data-asset-id="' . $asset->id . '"')
                         || str_contains($fieldValue, '#asset:' . $asset->id);
                 }
-                
+
                 if ($found) {
-                    // Resolve to top-level entry if this is a nested entry
-                    $resolvedEntry = $this->resolveToTopLevelEntry($entry);
-                    if ($resolvedEntry && $resolvedEntry->getSection()) {
-                        $results[] = [
-                            'id' => $resolvedEntry->id,
-                            'title' => $resolvedEntry->title,
-                            'url' => $resolvedEntry->getCpEditUrl(),
-                            'status' => $resolvedEntry->getStatus(),
-                            'section' => $resolvedEntry->getSection()?->name ?? '',
-                            'field' => $field->name,
-                        ];
-                    }
+                    $results[] = [
+                        'id' => $resolvedEntry->id,
+                        'title' => $resolvedEntry->title,
+                        'url' => $resolvedEntry->getCpEditUrl(),
+                        'status' => $resolvedEntry->getStatus(),
+                        'section' => $resolvedEntry->getSection()?->name ?? '',
+                        'field' => $field->name,
+                    ];
                     break; // Found in this entry, no need to check other fields
                 }
             }

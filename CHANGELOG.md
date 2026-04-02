@@ -11,11 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added configurable scan workspace path support via the `ASSET_CLEANER_SCAN_PATH` environment variable or `scanWorkspacePath` in `config/asset-cleaner.php`
 - Added a database-backed scan storage mode for containerized, cloud-style, and multi-worker environments where shared filesystem access is not guaranteed
 - Added plugin settings for selecting the scan storage mode and configuring the file-based scan workspace path
+- Added a draft usage default setting so teams can choose whether draft-only asset references should count as used by default
+- Added a per-scan utility toggle for including drafts in individual scans without changing the global default
 
 ### Changed
 - Refactored scan persistence into storage backends so the scan coordinator can run against either file-based or database-based storage
 - Hardened scan workspace file writes with stricter validation, readability checks, and better failure handling
 - Retained only the latest scan for restore/export workflows while allowing stale queued jobs to exit quietly if their scan has been replaced
+- Made draft handling explicit in scan behavior so installations can choose between canonical/live-oriented cleanup and draft-aware cleanup
 
 ### Fixed
 - Added path-aware diagnostics when scan metadata files are missing or unreadable, including resolved storage context details to help debug container and shared-storage setups

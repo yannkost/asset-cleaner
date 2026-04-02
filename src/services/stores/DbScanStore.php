@@ -57,7 +57,7 @@ class DbScanStore implements ScanStoreInterface
     /**
      * @inheritdoc
      */
-    public function initializeScan(string $scanId, array $volumeIds, int $assetChunkSize, int $entryBatchSize): void
+    public function initializeScan(string $scanId, array $volumeIds, int $assetChunkSize, int $entryBatchSize, bool $includeDrafts = false): void
     {
         $now = time();
 
@@ -67,6 +67,7 @@ class DbScanStore implements ScanStoreInterface
             'stage' => 'setup',
             'progress' => 0,
             'volumeIds' => Json::encode(array_values(array_unique(array_map('intval', $volumeIds)))),
+            'includeDrafts' => $includeDrafts ? 1 : 0,
             'assetChunkSize' => max(1, $assetChunkSize),
             'entryBatchSize' => max(1, $entryBatchSize),
             'totalAssets' => 0,
@@ -513,6 +514,7 @@ class DbScanStore implements ScanStoreInterface
             'updatedAt' => (int)($row['updatedAt'] ?? 0),
             'completedAt' => isset($row['completedAt']) ? (int)$row['completedAt'] : null,
             'volumeIds' => $this->decodeIntArray($row['volumeIds'] ?? null),
+            'includeDrafts' => !empty($row['includeDrafts']),
             'assetChunkSize' => $assetChunkSize,
             'entryBatchSize' => max(1, (int)($row['entryBatchSize'] ?? 200)),
             'status' => (string)($row['status'] ?? 'pending'),
@@ -538,6 +540,7 @@ class DbScanStore implements ScanStoreInterface
             'stage' => (string)($meta['stage'] ?? 'setup'),
             'progress' => (int)($meta['progress'] ?? 0),
             'volumeIds' => Json::encode(array_values(array_unique(array_map('intval', $meta['volumeIds'] ?? [])))),
+            'includeDrafts' => !empty($meta['includeDrafts']) ? 1 : 0,
             'assetChunkSize' => max(1, (int)($meta['assetChunkSize'] ?? 100)),
             'entryBatchSize' => max(1, (int)($meta['entryBatchSize'] ?? 200)),
             'totalAssets' => (int)($meta['totalAssets'] ?? 0),

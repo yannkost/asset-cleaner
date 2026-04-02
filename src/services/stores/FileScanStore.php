@@ -45,7 +45,7 @@ class FileScanStore extends Component implements ScanStoreInterface
     /**
      * @inheritdoc
      */
-    public function initializeScan(string $scanId, array $volumeIds, int $assetChunkSize, int $entryBatchSize): void
+    public function initializeScan(string $scanId, array $volumeIds, int $assetChunkSize, int $entryBatchSize, bool $includeDrafts): void
     {
         $scanId = trim($scanId);
         if ($scanId === '') {
@@ -55,6 +55,7 @@ class FileScanStore extends Component implements ScanStoreInterface
         $volumeIds = array_values(array_unique(array_map('intval', $volumeIds)));
         $assetChunkSize = max(1, $assetChunkSize);
         $entryBatchSize = max(1, $entryBatchSize);
+        $includeDrafts = (bool)$includeDrafts;
 
         $this->ensureBaseDirectories();
         $this->ensureWritableDirectory($this->getScanPath($scanId));
@@ -72,6 +73,7 @@ class FileScanStore extends Component implements ScanStoreInterface
             'volumeIds' => $volumeIds,
             'assetChunkSize' => $assetChunkSize,
             'entryBatchSize' => $entryBatchSize,
+            'includeDrafts' => $includeDrafts,
             'status' => ScanService::STATUS_PENDING,
             'stage' => ScanService::STAGE_SETUP,
             'totalAssets' => 0,

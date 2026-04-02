@@ -44,9 +44,11 @@ class AssetCleanerUtility extends Utility
     public static function contentHtml(): string
     {
         $volumes = Craft::$app->getVolumes()->getAllVolumes();
+        $settings = \yann\assetcleaner\Plugin::getInstance()->getSettings();
 
         return Craft::$app->getView()->renderTemplate('asset-cleaner/_utility/index', [
             'volumes' => $volumes,
+            'includeDraftsDefault' => (bool)($settings->includeDraftsByDefault ?? false),
         ]);
     }
 }
