@@ -68,7 +68,7 @@ class DbScanStore implements ScanStoreInterface
             'status' => 'pending',
             'stage' => 'setup',
             'progress' => 0,
-            'volumeIds' => $this->encodeVolumeIdsPayload($normalizedVolumeIds, $initiatingUserId, $includeRevisions),
+            'volumeIds' => $this->encodeVolumeIdsPayload($normalizedVolumeIds, $initiatingUserId),
             'includeDrafts' => $includeDrafts ? 1 : 0,
             'assetChunkSize' => max(1, $assetChunkSize),
             'entryBatchSize' => max(1, $entryBatchSize),
@@ -82,6 +82,10 @@ class DbScanStore implements ScanStoreInterface
             'completedAt' => null,
             'uid' => $this->generateUid(),
         ];
+
+        if ($this->hasIncludeRevisionsColumn()) {
+            $payload['includeRevisions'] = $includeRevisions ? 1 : 0;
+        }
 
         $this->db()->createCommand()->insert(self::TABLE_SCANS, $payload)->execute();
     }
@@ -459,6 +463,16 @@ class DbScanStore implements ScanStoreInterface
     }
 
     /**
+     * @return bool
+     */
+    private function hasIncludeRevisionsColumn(): bool
+    {
+        $schema = $this->db()->getTableSchema(self::TABLE_SCANS, true);
+
+        return $schema !== null && isset($schema->columns['includeRevisions']);
+    }
+
+    /**
      * @param string $scanId
      * @return array|null
      */
@@ -519,7 +533,9 @@ class DbScanStore implements ScanStoreInterface
             'volumeIds' => $volumeIdsPayload['ids'],
             'initiatingUserId' => $volumeIdsPayload['initiatingUserId'],
             'includeDrafts' => !empty($row['includeDrafts']),
-            'includeRevisions' => !empty($volumeIdsPayload['includeRevisions']),
+            'includeRevisions' => array_key_exists('includeRevisions', $row)
+                ? !empty($row['includeRevisions'])
+                : !empty($volumeIdsPayload['includeRevisions']),
             'assetChunkSize' => $assetChunkSize,
             'entryBatchSize' => max(1, (int)($row['entryBatchSize'] ?? 200)),
             'status' => (string)($row['status'] ?? 'pending'),
@@ -540,14 +556,13 @@ class DbScanStore implements ScanStoreInterface
      */
     private function serializeScanPayload(array $meta): array
     {
-        return [
+        $payload = [
             'status' => (string)($meta['status'] ?? 'pending'),
             'stage' => (string)($meta['stage'] ?? 'setup'),
             'progress' => (int)($meta['progress'] ?? 0),
             'volumeIds' => $this->encodeVolumeIdsPayload(
                 array_values(array_unique(array_map('intval', $meta['volumeIds'] ?? []))),
-                isset($meta['initiatingUserId']) ? (int)$meta['initiatingUserId'] : null,
-                !empty($meta['includeRevisions'])
+                isset($meta['initiatingUserId']) ? (int)$meta['initiatingUserId'] : null
             ),
             'includeDrafts' => !empty($meta['includeDrafts']) ? 1 : 0,
             'assetChunkSize' => max(1, (int)($meta['assetChunkSize'] ?? 100)),
@@ -560,6 +575,12 @@ class DbScanStore implements ScanStoreInterface
             'updatedAt' => (int)($meta['updatedAt'] ?? time()),
             'completedAt' => isset($meta['completedAt']) ? (int)$meta['completedAt'] : null,
         ];
+
+        if ($this->hasIncludeRevisionsColumn()) {
+            $payload['includeRevisions'] = !empty($meta['includeRevisions']) ? 1 : 0;
+        }
+
+        return $payload;
     }
 
     /**
@@ -606,15 +627,13 @@ class DbScanStore implements ScanStoreInterface
      *
      * @param array<int> $volumeIds
      * @param int|null $initiatingUserId
-     * @param bool $includeRevisions
      * @return string
      */
-    private function encodeVolumeIdsPayload(array $volumeIds, ?int $initiatingUserId, bool $includeRevisions = false): string
+    private function encodeVolumeIdsPayload(array $volumeIds, ?int $initiatingUserId): string
     {
         return Json::encode([
             'ids' => array_values(array_unique(array_map('intval', $volumeIds))),
             'initiatingUserId' => $initiatingUserId,
-            'includeRevisions' => $includeRevisions,
         ]);
     }
 

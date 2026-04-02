@@ -211,10 +211,10 @@ class AssetUsageService extends Component
 
     /**
      * Resolve one entry for usage checks while applying the configured draft
-     * policy. Revisions are always ignored.
+     * and revision policy.
      *
      * This is used both by the asset usage inspector and by batch scan logic so
-     * they apply the same draft-aware entry resolution rules.
+     * they apply the same editorial-state-aware entry resolution rules.
      *
      * @param Entry $entry
      * @param bool|null $includeDrafts
@@ -766,7 +766,8 @@ class AssetUsageService extends Component
      *
      * This returns only asset IDs whose relation rows can be resolved back to
      * a real top-level entry, which makes it suitable for batch scans that
-     * should ignore stale derivative relation rows.
+     * should ignore stale derivative relation rows while still honoring the
+     * configured draft and revision rules.
      *
      * @param array<int> $assetIds
      * @param bool|null $includeDrafts
@@ -855,7 +856,7 @@ class AssetUsageService extends Component
 
     /**
      * Find an entry by element ID for usage resolution, optionally including
-     * saved drafts and provisional drafts.
+     * saved drafts, provisional drafts, and revisions.
      *
      * @param int $sourceId
      * @param bool|null $includeDrafts

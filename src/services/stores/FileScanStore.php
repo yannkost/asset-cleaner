@@ -31,14 +31,45 @@ class FileScanStore extends Component implements ScanStoreInterface
         $root = $this->getScansRootPath();
 
         if (is_dir($root)) {
-            FileHelper::removeDirectory($root);
+            try {
+                FileHelper::removeDirectory($root);
+            } catch (\Throwable $e) {
+                $this->logStorageFailure('Unable to remove retained scan workspace directory.', [
+                    'directory' => $root,
+                    'error' => $e->getMessage(),
+                ]);
+                throw new Exception("Unable to remove retained scan workspace directory '{$root}': " . $e->getMessage());
+            }
+
+            clearstatcache(true, $root);
+            if (is_dir($root)) {
+                $this->logStorageFailure('Retained scan workspace directory still exists after removal.', [
+                    'directory' => $root,
+                ]);
+                throw new Exception("Retained scan workspace directory '{$root}' still exists after removal.");
+            }
         }
 
         $this->ensureBaseDirectories();
 
         $lastScanPath = $this->getLastScanFilePath();
         if (is_file($lastScanPath)) {
-            @unlink($lastScanPath);
+            if (!@unlink($lastScanPath)) {
+                $error = error_get_last();
+                $this->logStorageFailure('Unable to remove retained last scan file.', [
+                    'path' => $lastScanPath,
+                    'unlinkError' => $error['message'] ?? 'Unknown unlink error.',
+                ]);
+                throw new Exception("Unable to remove retained last scan file '{$lastScanPath}'.");
+            }
+
+            clearstatcache(true, $lastScanPath);
+            if (is_file($lastScanPath)) {
+                $this->logStorageFailure('Retained last scan file still exists after removal.', [
+                    'path' => $lastScanPath,
+                ]);
+                throw new Exception("Retained last scan file '{$lastScanPath}' still exists after removal.");
+            }
         }
     }
 
@@ -359,7 +390,24 @@ class FileScanStore extends Component implements ScanStoreInterface
 
         $resultsPath = $this->getResultsPath($scanId);
         if (is_file($resultsPath)) {
-            @unlink($resultsPath);
+            if (!@unlink($resultsPath)) {
+                $error = error_get_last();
+                $this->logStorageFailure('Unable to remove previous scan results file.', [
+                    'scanId' => $scanId,
+                    'path' => $resultsPath,
+                    'unlinkError' => $error['message'] ?? 'Unknown unlink error.',
+                ]);
+                throw new Exception("Unable to remove previous scan results file '{$resultsPath}'.");
+            }
+
+            clearstatcache(true, $resultsPath);
+            if (is_file($resultsPath)) {
+                $this->logStorageFailure('Previous scan results file still exists after removal.', [
+                    'scanId' => $scanId,
+                    'path' => $resultsPath,
+                ]);
+                throw new Exception("Previous scan results file '{$resultsPath}' still exists after removal.");
+            }
         }
     }
 
@@ -536,7 +584,23 @@ class FileScanStore extends Component implements ScanStoreInterface
     private function clearDirectory(string $directory): void
     {
         if (is_dir($directory)) {
-            FileHelper::removeDirectory($directory);
+            try {
+                FileHelper::removeDirectory($directory);
+            } catch (\Throwable $e) {
+                $this->logStorageFailure('Unable to clear scan workspace directory.', [
+                    'directory' => $directory,
+                    'error' => $e->getMessage(),
+                ]);
+                throw new Exception("Unable to clear scan workspace directory '{$directory}': " . $e->getMessage());
+            }
+
+            clearstatcache(true, $directory);
+            if (is_dir($directory)) {
+                $this->logStorageFailure('Scan workspace directory still exists after clear attempt.', [
+                    'directory' => $directory,
+                ]);
+                throw new Exception("Scan workspace directory '{$directory}' still exists after clear attempt.");
+            }
         }
 
         $this->ensureWritableDirectory($directory);
