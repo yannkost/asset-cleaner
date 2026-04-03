@@ -10,6 +10,7 @@
     let unusedAssets = [];
     let activeScanId = settings.lastScanId || null;
     let tooltipTimer = null;
+    let hasWarnedPollFailure = false;
 
     // Initialize when DOM is ready
     if (document.readyState === "loading") {
@@ -427,7 +428,15 @@
 
                     showScanTime(container, scanTime);
                 } catch (e) {
-                    // Don't freeze the UI if rendering fails
+                    console.error(
+                        "Asset Cleaner: failed to restore last scan UI.",
+                        e,
+                    );
+                    if (Craft && Craft.cp && Craft.cp.displayWarning) {
+                        Craft.cp.displayWarning(
+                            t.error || "An error occurred.",
+                        );
+                    }
                 }
             })
             .catch(function () {
@@ -523,6 +532,7 @@
             });
 
         scanBtn.disabled = true;
+        hasWarnedPollFailure = false;
 
         loading.style.display = "flex";
         progressBarContainer.style.display = "block";
@@ -709,8 +719,29 @@
                                 );
                             }
                         })
-                        .catch(function () {
-                            // Polling error — keep trying silently
+                        .catch(function (error) {
+                            console.warn(
+                                "Asset Cleaner: failed to poll scan progress.",
+                                error,
+                            );
+
+                            if (queueHint) {
+                                queueHint.style.display = "block";
+                            }
+
+                            if (!hasWarnedPollFailure) {
+                                hasWarnedPollFailure = true;
+                                if (
+                                    Craft &&
+                                    Craft.cp &&
+                                    Craft.cp.displayWarning
+                                ) {
+                                    Craft.cp.displayWarning(
+                                        t.scanPollingIssue ||
+                                            "Lost contact while polling scan progress. The scan may still be running.",
+                                    );
+                                }
+                            }
                         });
                 }, 1500);
             })

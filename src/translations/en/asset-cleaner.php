@@ -87,6 +87,7 @@ return [
     // Queue Scan
     'Scan queued...' => 'Scan queued...',
     'Scan failed.' => 'Scan failed.',
+    'Lost contact while polling scan progress. The scan may still be running.' => 'Lost contact while polling scan progress. The scan may still be running.',
     'Scanning assets for usage' => 'Scanning assets for usage',
     'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => 'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).',
 

@@ -138,7 +138,6 @@ class Plugin extends BasePlugin
 
                     $view = Craft::$app->getView();
                     $view->registerAssetBundle(AssetCleanerAsset::class);
-                    $settings = $this->getSettings();
 
                     $jsSettings = [
                         "translations" => [
@@ -236,6 +235,10 @@ class Plugin extends BasePlugin
                                 "asset-cleaner",
                                 "Scan failed.",
                             ),
+                            "scanPollingIssue" => Craft::t(
+                                "asset-cleaner",
+                                "Lost contact while polling scan progress. The scan may still be running.",
+                            ),
                             // Results & grid
                             "noUnusedAssetsFound" => Craft::t(
                                 "asset-cleaner",
@@ -330,12 +333,8 @@ class Plugin extends BasePlugin
                             ),
                         ],
                         "usageDefaults" => [
-                            "includeDrafts" =>
-                                (bool) ($settings->includeDraftsByDefault ??
-                                    false),
-                            "includeRevisions" =>
-                                (bool) ($settings->includeRevisionsByDefault ??
-                                    false),
+                            "includeDrafts" => $this->scanService->getDefaultIncludeDrafts(),
+                            "includeRevisions" => $this->scanService->getDefaultIncludeRevisions(),
                             "countAllRelationsAsUsage" => true,
                         ],
                     ];

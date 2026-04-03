@@ -751,13 +751,32 @@ class FileScanStore extends Component implements ScanStoreInterface
         }
 
         $contents = file_get_contents($path);
-        if ($contents === false || trim($contents) === "") {
+        if ($contents === false) {
+            $error = error_get_last();
+            $this->logStorageFailure(
+                "Unable to read JSON scan file.",
+                [
+                    "path" => $path,
+                    "readError" => $error["message"] ?? "Unknown read error.",
+                ],
+            );
+            return null;
+        }
+
+        if (trim($contents) === "") {
             return null;
         }
 
         try {
             return Json::decode($contents);
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            $this->logStorageFailure(
+                "Unable to decode JSON scan file.",
+                [
+                    "path" => $path,
+                    "error" => $e->getMessage(),
+                ],
+            );
             return null;
         }
     }
@@ -834,11 +853,22 @@ class FileScanStore extends Component implements ScanStoreInterface
 
         $fh = fopen($path, "rb");
         if ($fh === false) {
+            $error = error_get_last();
+            $this->logStorageFailure(
+                "Unable to open NDJSON scan file for reading.",
+                [
+                    "path" => $path,
+                    "readError" => $error["message"] ?? "Unknown read error.",
+                ],
+            );
             return;
         }
 
+        $lineNumber = 0;
+
         try {
             while (($line = fgets($fh)) !== false) {
+                $lineNumber++;
                 $line = trim($line);
                 if ($line === "") {
                     continue;
@@ -846,7 +876,15 @@ class FileScanStore extends Component implements ScanStoreInterface
 
                 try {
                     $row = Json::decode($line);
-                } catch (\Throwable) {
+                } catch (\Throwable $e) {
+                    $this->logStorageFailure(
+                        "Unable to decode NDJSON scan file row.",
+                        [
+                            "path" => $path,
+                            "line" => $lineNumber,
+                            "error" => $e->getMessage(),
+                        ],
+                    );
                     continue;
                 }
 

@@ -536,13 +536,12 @@ class ScanService extends Component
             1,
             (int) ($meta["entryBatchSize"] ?? self::DEFAULT_ENTRY_BATCH_SIZE),
         );
-        $entries = $this->loadEntriesForContentScan(
+        $totalEntries = $this->getContentScanEntryTotal(
             $relevantTypeIds,
             $includeDrafts,
             $includeRevisions,
             $initiatingUserId,
         );
-        $totalEntries = count($entries);
         $processedEntries = 0;
 
         $store->updateProgress($scanId, [
@@ -552,8 +551,33 @@ class ScanService extends Component
         ]);
 
         if ($totalEntries > 0) {
-            foreach ($entries as $entry) {
+            foreach (
+                $this->iterateEntriesForContentScan(
+                    $relevantTypeIds,
+                    $entryBatchSize,
+                    $includeDrafts,
+                    $includeRevisions,
+                    $initiatingUserId,
+                )
+                as $entry
+            ) {
                 /** @var Entry $entry */
+                if (
+                    $processedEntries > 0 &&
+                    $processedEntries % 25 === 0 &&
+                    !$this->scanExists($scanId)
+                ) {
+                    Logger::info(
+                        "Stopping content scan because the active scan was superseded.",
+                        [
+                            "scanId" => $scanId,
+                            "processedEntries" => $processedEntries,
+                        ],
+                    );
+
+                    return count($usedIds);
+                }
+
                 $resolvedEntry = Plugin::getInstance()->assetUsage->resolveUsageEntry(
                     $entry,
                     $includeDrafts,
@@ -584,7 +608,16 @@ class ScanService extends Component
                 foreach ($htmlFields as $field) {
                     try {
                         $fieldValue = $entry->getFieldValue($field->handle);
-                    } catch (\Throwable) {
+                    } catch (\Throwable $e) {
+                        Logger::warning(
+                            "Skipping field during content scan because its value could not be read.",
+                            [
+                                "scanId" => $scanId,
+                                "entryId" => (int) ($entry->id ?? 0),
+                                "fieldHandle" => (string) ($field->handle ?? ""),
+                                "error" => $e->getMessage(),
+                            ],
+                        );
                         continue;
                     }
 
@@ -626,6 +659,18 @@ class ScanService extends Component
             }
         }
 
+        if (!$this->scanExists($scanId)) {
+            Logger::info(
+                "Stopping content scan before global set scanning because the active scan was superseded.",
+                [
+                    "scanId" => $scanId,
+                    "processedEntries" => $processedEntries,
+                ],
+            );
+
+            return count($usedIds);
+        }
+
         foreach (GlobalSet::find()->all() as $globalSet) {
             /** @var GlobalSet $globalSet */
             $fieldLayout = $globalSet->getFieldLayout();
@@ -638,9 +683,22 @@ class ScanService extends Component
                     continue;
                 }
 
-                $content = $this->normalizeFieldValueToString(
-                    $globalSet->getFieldValue($field->handle),
-                );
+                try {
+                    $fieldValue = $globalSet->getFieldValue($field->handle);
+                } catch (\Throwable $e) {
+                    Logger::warning(
+                        "Skipping global set field during content scan because its value could not be read.",
+                        [
+                            "scanId" => $scanId,
+                            "globalSetId" => (int) ($globalSet->id ?? 0),
+                            "fieldHandle" => (string) ($field->handle ?? ""),
+                            "error" => $e->getMessage(),
+                        ],
+                    );
+                    continue;
+                }
+
+                $content = $this->normalizeFieldValueToString($fieldValue);
                 if ($content === "") {
                     continue;
                 }
@@ -1522,19 +1580,103 @@ class ScanService extends Component
     }
 
     /**
-     * Load all entries that should participate in content scanning.
+     * Count the entries that should participate in content scanning without
+     * materializing them all at once.
+     *
+     * @param array<int> $relevantTypeIds
+     * @param bool $includeDrafts
+     * @param bool $includeRevisions
+     * @param int|null $initiatingUserId
+     * @return int
+     */
+    private function getContentScanEntryTotal(
+        array $relevantTypeIds,
+        bool $includeDrafts,
+        bool $includeRevisions,
+        ?int $initiatingUserId = null,
+    ): int {
+        $total = 0;
+
+        foreach (
+            $this->getContentScanEntryQueries(
+                $relevantTypeIds,
+                $includeDrafts,
+                $includeRevisions,
+                $initiatingUserId,
+            )
+            as $query
+        ) {
+            $total += (int) $query->count();
+        }
+
+        return $total;
+    }
+
+    /**
+     * Iterate entries that should participate in content scanning in batches.
      *
      * When draft usage is enabled, this includes canonical entries, saved drafts,
      * and provisional drafts created by the user who started the scan. When
      * revision usage is enabled, this also includes revisions.
      *
      * @param array<int> $relevantTypeIds
+     * @param int $batchSize
      * @param bool $includeDrafts
      * @param bool $includeRevisions
      * @param int|null $initiatingUserId
-     * @return array<int, Entry>
+     * @return iterable<Entry>
      */
-    private function loadEntriesForContentScan(
+    private function iterateEntriesForContentScan(
+        array $relevantTypeIds,
+        int $batchSize,
+        bool $includeDrafts,
+        bool $includeRevisions,
+        ?int $initiatingUserId = null,
+    ): iterable {
+        if (empty($relevantTypeIds)) {
+            return;
+        }
+
+        $seenEntryIds = [];
+        $batchSize = max(1, $batchSize);
+
+        foreach (
+            $this->getContentScanEntryQueries(
+                $relevantTypeIds,
+                $includeDrafts,
+                $includeRevisions,
+                $initiatingUserId,
+            )
+            as $query
+        ) {
+            foreach ($query->batch($batchSize) as $entryBatch) {
+                foreach ($entryBatch as $entry) {
+                    if (!$entry instanceof Entry) {
+                        continue;
+                    }
+
+                    $entryId = (int) ($entry->id ?? 0);
+                    if ($entryId <= 0 || isset($seenEntryIds[$entryId])) {
+                        continue;
+                    }
+
+                    $seenEntryIds[$entryId] = true;
+                    yield $entry;
+                }
+            }
+        }
+    }
+
+    /**
+     * Build the element queries used for batched content scanning.
+     *
+     * @param array<int> $relevantTypeIds
+     * @param bool $includeDrafts
+     * @param bool $includeRevisions
+     * @param int|null $initiatingUserId
+     * @return array<int, \craft\elements\db\EntryQuery>
+     */
+    private function getContentScanEntryQueries(
         array $relevantTypeIds,
         bool $includeDrafts,
         bool $includeRevisions,
@@ -1544,56 +1686,37 @@ class ScanService extends Component
             return [];
         }
 
-        $entries = Entry::find()
-            ->typeId($relevantTypeIds)
-            ->status(null)
-            ->orderBy(["elements.id" => SORT_ASC])
-            ->all();
-
-        $indexedEntries = [];
-        foreach ($entries as $entry) {
-            $indexedEntries[$entry->id] = $entry;
-        }
+        $queries = [
+            Entry::find()
+                ->typeId($relevantTypeIds)
+                ->status(null)
+                ->orderBy(["elements.id" => SORT_ASC]),
+        ];
 
         if ($includeDrafts) {
-            $drafts = Entry::find()
+            $queries[] = Entry::find()
                 ->typeId($relevantTypeIds)
                 ->drafts()
                 ->savedDraftsOnly()
-                ->orderBy(["elements.id" => SORT_ASC])
-                ->all();
-
-            foreach ($drafts as $entry) {
-                $indexedEntries[$entry->id] = $entry;
-            }
+                ->orderBy(["elements.id" => SORT_ASC]);
 
             if ($initiatingUserId !== null && $initiatingUserId > 0) {
-                $provisionalDrafts = Entry::find()
+                $queries[] = Entry::find()
                     ->typeId($relevantTypeIds)
                     ->provisionalDrafts()
                     ->draftCreator($initiatingUserId)
-                    ->orderBy(["elements.id" => SORT_ASC])
-                    ->all();
-
-                foreach ($provisionalDrafts as $entry) {
-                    $indexedEntries[$entry->id] = $entry;
-                }
+                    ->orderBy(["elements.id" => SORT_ASC]);
             }
         }
 
         if ($includeRevisions) {
-            $revisions = Entry::find()
+            $queries[] = Entry::find()
                 ->typeId($relevantTypeIds)
                 ->revisions()
-                ->orderBy(["elements.id" => SORT_ASC])
-                ->all();
-
-            foreach ($revisions as $entry) {
-                $indexedEntries[$entry->id] = $entry;
-            }
+                ->orderBy(["elements.id" => SORT_ASC]);
         }
 
-        return array_values($indexedEntries);
+        return $queries;
     }
 
     /**

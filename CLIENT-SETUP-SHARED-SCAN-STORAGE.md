@@ -1,10 +1,10 @@
 # Shared Scan Workspace Setup for Multi-Container Environments
 
-This guide explains how to configure **Asset Cleaner** when your Craft web requests and queue runner do **not** run in the same container.
+This guide explains how to configure **Asset Cleaner** when your Craft web requests and queue runner do **not** run in the same container, with guidance for both **file-based** and **database-based** scan storage.
 
 ## Why this setup is needed
 
-Asset Cleaner stores scan progress and temporary scan data in a file-backed workspace.
+When Asset Cleaner is configured for **file-based scan storage**, it stores scan progress and temporary scan data in a shared workspace.
 
 By default, that workspace lives under:
 
@@ -17,6 +17,8 @@ If they do not share the same filesystem path, the queue worker may fail with er
 - `Scan metadata not found for 'scan_...'`
 - missing `meta.json`
 - scan starts in the control panel, but fails immediately in the queue
+
+If you use **database-based scan storage** instead, this shared filesystem requirement does not apply because scan state is stored in the database rather than on disk.
 
 ---
 
@@ -136,16 +138,17 @@ and both services must have:
 
 # What the plugin stores there
 
-Asset Cleaner writes transient scan files such as:
+In **file-based** mode, Asset Cleaner writes transient scan files such as:
 
 - `meta.json`
 - `progress.json`
-- `state.json`
 - asset chunk files
 - used-ID files
 - final scan result files
 
 These are operational scan files, not public assets.
+
+In **database-based** mode, the equivalent scan state is stored in dedicated database tables instead of this filesystem workspace.
 
 ---
 
@@ -185,21 +188,17 @@ Once configured correctly:
 
 # Notes
 
-- This setup is specifically important for **multi-container** or **multi-node** deployments.
-- On a single-server installation where web and queue share the same local storage, the default configuration is usually sufficient.
-- If your infrastructure cannot provide shared filesystem access between web and queue workers, a database-backed scan state architecture may be required in a future version.
+- This setup is specifically important for **multi-container** or **multi-node** deployments that use **file-based** scan storage.
+- On a single-server installation where web and queue share the same local storage, the default file-based configuration is usually sufficient.
+- If your infrastructure cannot provide shared filesystem access between web and queue workers, switch Asset Cleaner to **database-based** scan storage instead.
 
 ---
 
 # Summary
 
-For multi-container environments, Asset Cleaner requires a **shared scan workspace**.
+For multi-container environments, choose the scan storage mode that matches your infrastructure:
 
-Use:
-
-- a shared mounted directory
-- the same `ASSET_CLEANER_SCAN_PATH` in both containers
-- `config/asset-cleaner.php` with:
+- **File-based storage**: use a **shared scan workspace**, the same `ASSET_CLEANER_SCAN_PATH` in both containers, and `config/asset-cleaner.php` with:
 
 ```php
 <?php
@@ -209,4 +208,6 @@ return [
 ];
 ```
 
-This ensures both the web process and the queue worker operate on the same scan files.
+- **Database-based storage**: use this when web and queue workers do not share a reliable filesystem path.
+
+With the correct storage mode configured, both the web process and the queue worker can operate on the same scan state safely.
