@@ -30,10 +30,20 @@ interface ScanStoreInterface
      * @param int $entryBatchSize
      * @param bool $includeDrafts
      * @param bool $includeRevisions
+     * @param bool $countAllRelationsAsUsage
      * @param int|null $initiatorId
      * @return void
      */
-    public function initializeScan(string $scanId, array $volumeIds, int $assetChunkSize, int $entryBatchSize, bool $includeDrafts, bool $includeRevisions, ?int $initiatorId = null): void;
+    public function initializeScan(
+        string $scanId,
+        array $volumeIds,
+        int $assetChunkSize,
+        int $entryBatchSize,
+        bool $includeDrafts,
+        bool $includeRevisions,
+        bool $countAllRelationsAsUsage,
+        ?int $initiatorId = null,
+    ): void;
 
     /**
      * Whether the scan still exists in the active storage backend.
@@ -134,7 +144,11 @@ interface ScanStoreInterface
      * @param array $rows
      * @return void
      */
-    public function storeAssetSnapshotChunk(string $scanId, int $chunkIndex, array $rows): void;
+    public function storeAssetSnapshotChunk(
+        string $scanId,
+        int $chunkIndex,
+        array $rows,
+    ): void;
 
     /**
      * Iterate all stored asset snapshot rows for the scan.
@@ -155,7 +169,11 @@ interface ScanStoreInterface
      * @param array $assetIds
      * @return void
      */
-    public function replaceUsedIds(string $scanId, string $source, array $assetIds): void;
+    public function replaceUsedIds(
+        string $scanId,
+        string $source,
+        array $assetIds,
+    ): void;
 
     /**
      * Get merged unique used asset IDs for the scan.

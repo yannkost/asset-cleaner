@@ -21,7 +21,7 @@ use yii\base\Exception;
  */
 class FileScanStore extends Component implements ScanStoreInterface
 {
-    private const LAST_SCAN_FILE = 'last-scan.json';
+    private const LAST_SCAN_FILE = "last-scan.json";
 
     /**
      * @inheritdoc
@@ -34,19 +34,30 @@ class FileScanStore extends Component implements ScanStoreInterface
             try {
                 FileHelper::removeDirectory($root);
             } catch (\Throwable $e) {
-                $this->logStorageFailure('Unable to remove retained scan workspace directory.', [
-                    'directory' => $root,
-                    'error' => $e->getMessage(),
-                ]);
-                throw new Exception("Unable to remove retained scan workspace directory '{$root}': " . $e->getMessage());
+                $this->logStorageFailure(
+                    "Unable to remove retained scan workspace directory.",
+                    [
+                        "directory" => $root,
+                        "error" => $e->getMessage(),
+                    ],
+                );
+                throw new Exception(
+                    "Unable to remove retained scan workspace directory '{$root}': " .
+                        $e->getMessage(),
+                );
             }
 
             clearstatcache(true, $root);
             if (is_dir($root)) {
-                $this->logStorageFailure('Retained scan workspace directory still exists after removal.', [
-                    'directory' => $root,
-                ]);
-                throw new Exception("Retained scan workspace directory '{$root}' still exists after removal.");
+                $this->logStorageFailure(
+                    "Retained scan workspace directory still exists after removal.",
+                    [
+                        "directory" => $root,
+                    ],
+                );
+                throw new Exception(
+                    "Retained scan workspace directory '{$root}' still exists after removal.",
+                );
             }
         }
 
@@ -56,19 +67,30 @@ class FileScanStore extends Component implements ScanStoreInterface
         if (is_file($lastScanPath)) {
             if (!@unlink($lastScanPath)) {
                 $error = error_get_last();
-                $this->logStorageFailure('Unable to remove retained last scan file.', [
-                    'path' => $lastScanPath,
-                    'unlinkError' => $error['message'] ?? 'Unknown unlink error.',
-                ]);
-                throw new Exception("Unable to remove retained last scan file '{$lastScanPath}'.");
+                $this->logStorageFailure(
+                    "Unable to remove retained last scan file.",
+                    [
+                        "path" => $lastScanPath,
+                        "unlinkError" =>
+                            $error["message"] ?? "Unknown unlink error.",
+                    ],
+                );
+                throw new Exception(
+                    "Unable to remove retained last scan file '{$lastScanPath}'.",
+                );
             }
 
             clearstatcache(true, $lastScanPath);
             if (is_file($lastScanPath)) {
-                $this->logStorageFailure('Retained last scan file still exists after removal.', [
-                    'path' => $lastScanPath,
-                ]);
-                throw new Exception("Retained last scan file '{$lastScanPath}' still exists after removal.");
+                $this->logStorageFailure(
+                    "Retained last scan file still exists after removal.",
+                    [
+                        "path" => $lastScanPath,
+                    ],
+                );
+                throw new Exception(
+                    "Retained last scan file '{$lastScanPath}' still exists after removal.",
+                );
             }
         }
     }
@@ -76,18 +98,29 @@ class FileScanStore extends Component implements ScanStoreInterface
     /**
      * @inheritdoc
      */
-    public function initializeScan(string $scanId, array $volumeIds, int $assetChunkSize, int $entryBatchSize, bool $includeDrafts, bool $includeRevisions, ?int $initiatorId = null): void
-    {
+    public function initializeScan(
+        string $scanId,
+        array $volumeIds,
+        int $assetChunkSize,
+        int $entryBatchSize,
+        bool $includeDrafts,
+        bool $includeRevisions,
+        bool $countAllRelationsAsUsage,
+        ?int $initiatorId = null,
+    ): void {
         $scanId = trim($scanId);
-        if ($scanId === '') {
-            throw new Exception('Missing scan ID.');
+        if ($scanId === "") {
+            throw new Exception("Missing scan ID.");
         }
 
-        $volumeIds = array_values(array_unique(array_map('intval', $volumeIds)));
+        $volumeIds = array_values(
+            array_unique(array_map("intval", $volumeIds)),
+        );
         $assetChunkSize = max(1, $assetChunkSize);
         $entryBatchSize = max(1, $entryBatchSize);
-        $includeDrafts = (bool)$includeDrafts;
-        $includeRevisions = (bool)$includeRevisions;
+        $includeDrafts = (bool) $includeDrafts;
+        $includeRevisions = (bool) $includeRevisions;
+        $countAllRelationsAsUsage = (bool) $countAllRelationsAsUsage;
 
         $this->ensureBaseDirectories();
         $this->ensureWritableDirectory($this->getScanPath($scanId));
@@ -99,42 +132,53 @@ class FileScanStore extends Component implements ScanStoreInterface
         $initiatingUserId = $initiatorId;
 
         $this->writeJsonFile($this->getMetaPath($scanId), [
-            'scanId' => $scanId,
-            'createdAt' => $now,
-            'updatedAt' => $now,
-            'completedAt' => null,
-            'initiatingUserId' => $initiatingUserId !== null ? (int)$initiatingUserId : null,
-            'volumeIds' => $volumeIds,
-            'assetChunkSize' => $assetChunkSize,
-            'entryBatchSize' => $entryBatchSize,
-            'includeDrafts' => $includeDrafts,
-            'includeRevisions' => $includeRevisions,
-            'status' => ScanService::STATUS_PENDING,
-            'stage' => ScanService::STAGE_SETUP,
-            'totalAssets' => 0,
-            'processedAssets' => 0,
-            'usedCount' => 0,
-            'unusedCount' => 0,
-            'totalChunks' => 0,
-            'error' => null,
+            "scanId" => $scanId,
+            "createdAt" => $now,
+            "updatedAt" => $now,
+            "completedAt" => null,
+            "initiatingUserId" =>
+                $initiatingUserId !== null ? (int) $initiatingUserId : null,
+            "volumeIds" => $volumeIds,
+            "assetChunkSize" => $assetChunkSize,
+            "entryBatchSize" => $entryBatchSize,
+            "includeDrafts" => $includeDrafts,
+            "includeRevisions" => $includeRevisions,
+            "countAllRelationsAsUsage" => $countAllRelationsAsUsage,
+            "status" => ScanService::STATUS_PENDING,
+            "stage" => ScanService::STAGE_SETUP,
+            "totalAssets" => 0,
+            "processedAssets" => 0,
+            "usedCount" => 0,
+            "unusedCount" => 0,
+            "totalChunks" => 0,
+            "error" => null,
         ]);
 
         $this->writeJsonFile($this->getProgressPath($scanId), [
-            'status' => ScanService::STATUS_PENDING,
-            'stage' => ScanService::STAGE_SETUP,
-            'progress' => 0,
-            'totalAssets' => 0,
-            'processedAssets' => 0,
-            'usedCount' => 0,
-            'unusedCount' => 0,
-            'error' => null,
-            'updatedAt' => $now,
+            "status" => ScanService::STATUS_PENDING,
+            "stage" => ScanService::STAGE_SETUP,
+            "progress" => 0,
+            "totalAssets" => 0,
+            "processedAssets" => 0,
+            "usedCount" => 0,
+            "unusedCount" => 0,
+            "error" => null,
+            "updatedAt" => $now,
         ]);
 
-        $this->assertReadableFile($this->getMetaPath($scanId), 'scan metadata file');
-        $this->assertReadableFile($this->getProgressPath($scanId), 'scan progress file');
+        $this->assertReadableFile(
+            $this->getMetaPath($scanId),
+            "scan metadata file",
+        );
+        $this->assertReadableFile(
+            $this->getProgressPath($scanId),
+            "scan progress file",
+        );
 
-        Logger::debug('Initialized file-backed scan workspace.', $this->buildStorageDiagnostics($scanId));
+        Logger::debug(
+            "Initialized file-backed scan workspace.",
+            $this->buildStorageDiagnostics($scanId),
+        );
     }
 
     /**
@@ -172,12 +216,19 @@ class FileScanStore extends Component implements ScanStoreInterface
     {
         $meta = $this->getMeta($scanId);
         if ($meta === null) {
-            Logger::error('Scan metadata file is missing or unreadable.', $this->buildStorageDiagnostics($scanId));
-            throw new Exception("Scan metadata not found for '{$scanId}'. Expected metadata file at '{$this->getMetaPath($scanId)}'.");
+            Logger::error(
+                "Scan metadata file is missing or unreadable.",
+                $this->buildStorageDiagnostics($scanId),
+            );
+            throw new Exception(
+                "Scan metadata not found for '{$scanId}'. Expected metadata file at '{$this->getMetaPath(
+                    $scanId,
+                )}'.",
+            );
         }
 
         $meta = array_merge($meta, $updates, [
-            'updatedAt' => time(),
+            "updatedAt" => time(),
         ]);
 
         $this->writeJsonFile($this->getMetaPath($scanId), $meta);
@@ -191,24 +242,24 @@ class FileScanStore extends Component implements ScanStoreInterface
         $progress = $this->getProgress($scanId) ?? [];
 
         $progress = array_merge($progress, $updates, [
-            'updatedAt' => time(),
+            "updatedAt" => time(),
         ]);
 
-        if (!isset($progress['stage'])) {
-            $progress['stage'] = ScanService::STAGE_SETUP;
+        if (!isset($progress["stage"])) {
+            $progress["stage"] = ScanService::STAGE_SETUP;
         }
 
         $this->writeJsonFile($this->getProgressPath($scanId), $progress);
 
         if ($this->scanExists($scanId) && $this->getMeta($scanId) !== null) {
             $this->updateMeta($scanId, [
-                'status' => $progress['status'] ?? ScanService::STATUS_RUNNING,
-                'stage' => $progress['stage'],
-                'totalAssets' => (int)($progress['totalAssets'] ?? 0),
-                'processedAssets' => (int)($progress['processedAssets'] ?? 0),
-                'usedCount' => (int)($progress['usedCount'] ?? 0),
-                'unusedCount' => (int)($progress['unusedCount'] ?? 0),
-                'error' => $progress['error'] ?? null,
+                "status" => $progress["status"] ?? ScanService::STATUS_RUNNING,
+                "stage" => $progress["stage"],
+                "totalAssets" => (int) ($progress["totalAssets"] ?? 0),
+                "processedAssets" => (int) ($progress["processedAssets"] ?? 0),
+                "usedCount" => (int) ($progress["usedCount"] ?? 0),
+                "unusedCount" => (int) ($progress["unusedCount"] ?? 0),
+                "error" => $progress["error"] ?? null,
             ]);
         }
     }
@@ -224,14 +275,14 @@ class FileScanStore extends Component implements ScanStoreInterface
 
         if ($this->getMeta($scanId) !== null) {
             $this->updateMeta($scanId, [
-                'status' => ScanService::STATUS_FAILED,
-                'error' => $message,
+                "status" => ScanService::STATUS_FAILED,
+                "error" => $message,
             ]);
         }
 
         $this->updateProgress($scanId, [
-            'status' => ScanService::STATUS_FAILED,
-            'error' => $message,
+            "status" => ScanService::STATUS_FAILED,
+            "error" => $message,
         ]);
     }
 
@@ -244,7 +295,9 @@ class FileScanStore extends Component implements ScanStoreInterface
         if (!is_file($path)) {
             $meta = $this->getMeta($scanId);
 
-            return (($meta['status'] ?? null) === ScanService::STATUS_COMPLETE) ? [] : null;
+            return ($meta["status"] ?? null) === ScanService::STATUS_COMPLETE
+                ? []
+                : null;
         }
 
         $results = [];
@@ -268,7 +321,7 @@ class FileScanStore extends Component implements ScanStoreInterface
 
         $meta = $this->getMeta($scanId);
 
-        return (($meta['status'] ?? null) === ScanService::STATUS_COMPLETE);
+        return ($meta["status"] ?? null) === ScanService::STATUS_COMPLETE;
     }
 
     /**
@@ -281,11 +334,11 @@ class FileScanStore extends Component implements ScanStoreInterface
             return null;
         }
 
-        if (empty($payload['scanId']) || empty($payload['completedAt'])) {
+        if (empty($payload["scanId"]) || empty($payload["completedAt"])) {
             return null;
         }
 
-        if (!$this->hasResults((string)$payload['scanId'])) {
+        if (!$this->hasResults((string) $payload["scanId"])) {
             return null;
         }
 
@@ -298,8 +351,8 @@ class FileScanStore extends Component implements ScanStoreInterface
     public function setLastScan(string $scanId, ?int $completedAt = null): void
     {
         $this->writeJsonFile($this->getLastScanFilePath(), [
-            'scanId' => $scanId,
-            'completedAt' => $completedAt ?? time(),
+            "scanId" => $scanId,
+            "completedAt" => $completedAt ?? time(),
         ]);
     }
 
@@ -314,10 +367,16 @@ class FileScanStore extends Component implements ScanStoreInterface
     /**
      * @inheritdoc
      */
-    public function storeAssetSnapshotChunk(string $scanId, int $chunkIndex, array $rows): void
-    {
-        $filename = sprintf('chunk-%06d.ndjson', $chunkIndex + 1);
-        $path = $this->getAssetsDirectory($scanId) . DIRECTORY_SEPARATOR . $filename;
+    public function storeAssetSnapshotChunk(
+        string $scanId,
+        int $chunkIndex,
+        array $rows,
+    ): void {
+        $filename = sprintf("chunk-%06d.ndjson", $chunkIndex + 1);
+        $path =
+            $this->getAssetsDirectory($scanId) .
+            DIRECTORY_SEPARATOR .
+            $filename;
 
         $this->writeNdjsonFile($path, $rows);
     }
@@ -339,9 +398,12 @@ class FileScanStore extends Component implements ScanStoreInterface
     /**
      * @inheritdoc
      */
-    public function replaceUsedIds(string $scanId, string $source, array $assetIds): void
-    {
-        $assetIds = array_values(array_unique(array_map('intval', $assetIds)));
+    public function replaceUsedIds(
+        string $scanId,
+        string $source,
+        array $assetIds,
+    ): void {
+        $assetIds = array_values(array_unique(array_map("intval", $assetIds)));
         sort($assetIds, SORT_NUMERIC);
 
         $this->writeLines($this->getUsedIdsPath($scanId, $source), $assetIds);
@@ -359,23 +421,23 @@ class FileScanStore extends Component implements ScanStoreInterface
             return [];
         }
 
-        $files = glob($directory . DIRECTORY_SEPARATOR . '*.txt') ?: [];
+        $files = glob($directory . DIRECTORY_SEPARATOR . "*.txt") ?: [];
         sort($files, SORT_NATURAL);
 
         foreach ($files as $path) {
-            if (basename($path) === 'final.txt') {
+            if (basename($path) === "final.txt") {
                 continue;
             }
 
             foreach ($this->iterateTextLines($path) as $line) {
-                $id = (int)$line;
+                $id = (int) $line;
                 if ($id > 0) {
                     $used[$id] = true;
                 }
             }
         }
 
-        $ids = array_map('intval', array_keys($used));
+        $ids = array_map("intval", array_keys($used));
         sort($ids, SORT_NUMERIC);
 
         return $ids;
@@ -392,21 +454,32 @@ class FileScanStore extends Component implements ScanStoreInterface
         if (is_file($resultsPath)) {
             if (!@unlink($resultsPath)) {
                 $error = error_get_last();
-                $this->logStorageFailure('Unable to remove previous scan results file.', [
-                    'scanId' => $scanId,
-                    'path' => $resultsPath,
-                    'unlinkError' => $error['message'] ?? 'Unknown unlink error.',
-                ]);
-                throw new Exception("Unable to remove previous scan results file '{$resultsPath}'.");
+                $this->logStorageFailure(
+                    "Unable to remove previous scan results file.",
+                    [
+                        "scanId" => $scanId,
+                        "path" => $resultsPath,
+                        "unlinkError" =>
+                            $error["message"] ?? "Unknown unlink error.",
+                    ],
+                );
+                throw new Exception(
+                    "Unable to remove previous scan results file '{$resultsPath}'.",
+                );
             }
 
             clearstatcache(true, $resultsPath);
             if (is_file($resultsPath)) {
-                $this->logStorageFailure('Previous scan results file still exists after removal.', [
-                    'scanId' => $scanId,
-                    'path' => $resultsPath,
-                ]);
-                throw new Exception("Previous scan results file '{$resultsPath}' still exists after removal.");
+                $this->logStorageFailure(
+                    "Previous scan results file still exists after removal.",
+                    [
+                        "scanId" => $scanId,
+                        "path" => $resultsPath,
+                    ],
+                );
+                throw new Exception(
+                    "Previous scan results file '{$resultsPath}' still exists after removal.",
+                );
             }
         }
     }
@@ -423,39 +496,54 @@ class FileScanStore extends Component implements ScanStoreInterface
         $path = $this->getResultsPath($scanId);
         $this->ensureWritableDirectory(dirname($path));
 
-        $fh = fopen($path, 'ab');
+        $fh = fopen($path, "ab");
         if ($fh === false) {
-            $this->logStorageFailure('Unable to open results file for appending.', [
-                'scanId' => $scanId,
-                'path' => $path,
-            ]);
-            throw new Exception("Unable to open results file for scan '{$scanId}'.");
+            $this->logStorageFailure(
+                "Unable to open results file for appending.",
+                [
+                    "scanId" => $scanId,
+                    "path" => $path,
+                ],
+            );
+            throw new Exception(
+                "Unable to open results file for scan '{$scanId}'.",
+            );
         }
 
         try {
             foreach ($rows as $row) {
                 $written = fwrite($fh, Json::encode($row) . PHP_EOL);
                 if ($written === false) {
-                    $this->logStorageFailure('Unable to append unused asset result row.', [
-                        'scanId' => $scanId,
-                        'path' => $path,
-                    ]);
-                    throw new Exception("Unable to append unused asset results for scan '{$scanId}'.");
+                    $this->logStorageFailure(
+                        "Unable to append unused asset result row.",
+                        [
+                            "scanId" => $scanId,
+                            "path" => $path,
+                        ],
+                    );
+                    throw new Exception(
+                        "Unable to append unused asset results for scan '{$scanId}'.",
+                    );
                 }
             }
 
             if (!fflush($fh)) {
-                $this->logStorageFailure('Unable to flush results file after appending.', [
-                    'scanId' => $scanId,
-                    'path' => $path,
-                ]);
-                throw new Exception("Unable to flush results file for scan '{$scanId}'.");
+                $this->logStorageFailure(
+                    "Unable to flush results file after appending.",
+                    [
+                        "scanId" => $scanId,
+                        "path" => $path,
+                    ],
+                );
+                throw new Exception(
+                    "Unable to flush results file for scan '{$scanId}'.",
+                );
             }
         } finally {
             fclose($fh);
         }
 
-        $this->assertReadableFile($path, 'unused asset results file');
+        $this->assertReadableFile($path, "unused asset results file");
     }
 
     /**
@@ -468,7 +556,9 @@ class FileScanStore extends Component implements ScanStoreInterface
             return $configuredPath;
         }
 
-        return Craft::getAlias('@storage') . DIRECTORY_SEPARATOR . 'asset-cleaner';
+        return Craft::getAlias("@storage") .
+            DIRECTORY_SEPARATOR .
+            "asset-cleaner";
     }
 
     private function getConfiguredWorkspacePath(): ?string
@@ -476,33 +566,50 @@ class FileScanStore extends Component implements ScanStoreInterface
         $configuredPath = null;
 
         try {
-            $config = Craft::$app->getConfig()->getConfigFromFile('asset-cleaner');
-            if (is_array($config) && isset($config['scanWorkspacePath']) && is_string($config['scanWorkspacePath'])) {
-                $configuredPath = trim($config['scanWorkspacePath']);
+            $config = Craft::$app
+                ->getConfig()
+                ->getConfigFromFile("asset-cleaner");
+            if (
+                is_array($config) &&
+                isset($config["scanWorkspacePath"]) &&
+                is_string($config["scanWorkspacePath"])
+            ) {
+                $configuredPath = trim($config["scanWorkspacePath"]);
             }
         } catch (\Throwable $e) {
-            Logger::warning('Could not load Asset Cleaner config while resolving the file-backed scan workspace path.', [
-                'error' => $e->getMessage(),
-            ]);
+            Logger::warning(
+                "Could not load Asset Cleaner config while resolving the file-backed scan workspace path.",
+                [
+                    "error" => $e->getMessage(),
+                ],
+            );
         }
 
         try {
             $settings = Plugin::getInstance()->getSettings();
-            if (is_object($settings) && isset($settings->scanWorkspacePath) && is_string($settings->scanWorkspacePath) && trim($settings->scanWorkspacePath) !== '') {
+            if (
+                is_object($settings) &&
+                isset($settings->scanWorkspacePath) &&
+                is_string($settings->scanWorkspacePath) &&
+                trim($settings->scanWorkspacePath) !== ""
+            ) {
                 $configuredPath ??= trim($settings->scanWorkspacePath);
             }
         } catch (\Throwable $e) {
-            Logger::warning('Could not load Asset Cleaner settings while resolving the file-backed scan workspace path.', [
-                'error' => $e->getMessage(),
-            ]);
+            Logger::warning(
+                "Could not load Asset Cleaner settings while resolving the file-backed scan workspace path.",
+                [
+                    "error" => $e->getMessage(),
+                ],
+            );
         }
 
-        $envPath = getenv('ASSET_CLEANER_SCAN_PATH');
-        if (is_string($envPath) && trim($envPath) !== '') {
+        $envPath = getenv("ASSET_CLEANER_SCAN_PATH");
+        if (is_string($envPath) && trim($envPath) !== "") {
             $configuredPath = trim($envPath);
         }
 
-        if ($configuredPath === null || $configuredPath === '') {
+        if ($configuredPath === null || $configuredPath === "") {
             return null;
         }
 
@@ -514,7 +621,7 @@ class FileScanStore extends Component implements ScanStoreInterface
 
     private function getScansRootPath(): string
     {
-        return $this->getBaseStoragePath() . DIRECTORY_SEPARATOR . 'scans';
+        return $this->getBaseStoragePath() . DIRECTORY_SEPARATOR . "scans";
     }
 
     private function getScanPath(string $scanId): string
@@ -524,42 +631,51 @@ class FileScanStore extends Component implements ScanStoreInterface
 
     private function getMetaPath(string $scanId): string
     {
-        return $this->getScanPath($scanId) . DIRECTORY_SEPARATOR . 'meta.json';
+        return $this->getScanPath($scanId) . DIRECTORY_SEPARATOR . "meta.json";
     }
 
     private function getProgressPath(string $scanId): string
     {
-        return $this->getScanPath($scanId) . DIRECTORY_SEPARATOR . 'progress.json';
+        return $this->getScanPath($scanId) .
+            DIRECTORY_SEPARATOR .
+            "progress.json";
     }
 
     private function getAssetsDirectory(string $scanId): string
     {
-        return $this->getScanPath($scanId) . DIRECTORY_SEPARATOR . 'assets';
+        return $this->getScanPath($scanId) . DIRECTORY_SEPARATOR . "assets";
     }
 
     private function getUsedDirectory(string $scanId): string
     {
-        return $this->getScanPath($scanId) . DIRECTORY_SEPARATOR . 'used';
+        return $this->getScanPath($scanId) . DIRECTORY_SEPARATOR . "used";
     }
 
     private function getResultsDirectory(string $scanId): string
     {
-        return $this->getScanPath($scanId) . DIRECTORY_SEPARATOR . 'results';
+        return $this->getScanPath($scanId) . DIRECTORY_SEPARATOR . "results";
     }
 
     private function getResultsPath(string $scanId): string
     {
-        return $this->getResultsDirectory($scanId) . DIRECTORY_SEPARATOR . 'unused.ndjson';
+        return $this->getResultsDirectory($scanId) .
+            DIRECTORY_SEPARATOR .
+            "unused.ndjson";
     }
 
     private function getUsedIdsPath(string $scanId, string $source): string
     {
-        return $this->getUsedDirectory($scanId) . DIRECTORY_SEPARATOR . $source . '.txt';
+        return $this->getUsedDirectory($scanId) .
+            DIRECTORY_SEPARATOR .
+            $source .
+            ".txt";
     }
 
     private function getLastScanFilePath(): string
     {
-        return $this->getBaseStoragePath() . DIRECTORY_SEPARATOR . self::LAST_SCAN_FILE;
+        return $this->getBaseStoragePath() .
+            DIRECTORY_SEPARATOR .
+            self::LAST_SCAN_FILE;
     }
 
     private function ensureBaseDirectories(): void
@@ -575,7 +691,8 @@ class FileScanStore extends Component implements ScanStoreInterface
             return [];
         }
 
-        $files = glob($directory . DIRECTORY_SEPARATOR . 'chunk-*.ndjson') ?: [];
+        $files =
+            glob($directory . DIRECTORY_SEPARATOR . "chunk-*.ndjson") ?: [];
         sort($files, SORT_NATURAL);
 
         return array_values($files);
@@ -587,19 +704,30 @@ class FileScanStore extends Component implements ScanStoreInterface
             try {
                 FileHelper::removeDirectory($directory);
             } catch (\Throwable $e) {
-                $this->logStorageFailure('Unable to clear scan workspace directory.', [
-                    'directory' => $directory,
-                    'error' => $e->getMessage(),
-                ]);
-                throw new Exception("Unable to clear scan workspace directory '{$directory}': " . $e->getMessage());
+                $this->logStorageFailure(
+                    "Unable to clear scan workspace directory.",
+                    [
+                        "directory" => $directory,
+                        "error" => $e->getMessage(),
+                    ],
+                );
+                throw new Exception(
+                    "Unable to clear scan workspace directory '{$directory}': " .
+                        $e->getMessage(),
+                );
             }
 
             clearstatcache(true, $directory);
             if (is_dir($directory)) {
-                $this->logStorageFailure('Scan workspace directory still exists after clear attempt.', [
-                    'directory' => $directory,
-                ]);
-                throw new Exception("Scan workspace directory '{$directory}' still exists after clear attempt.");
+                $this->logStorageFailure(
+                    "Scan workspace directory still exists after clear attempt.",
+                    [
+                        "directory" => $directory,
+                    ],
+                );
+                throw new Exception(
+                    "Scan workspace directory '{$directory}' still exists after clear attempt.",
+                );
             }
         }
 
@@ -609,7 +737,10 @@ class FileScanStore extends Component implements ScanStoreInterface
     private function writeJsonFile(string $path, array $payload): void
     {
         $this->ensureWritableDirectory(dirname($path));
-        $json = Json::encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        $json = Json::encode(
+            $payload,
+            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES,
+        );
         $this->writeFileAtomically($path, $json . PHP_EOL);
     }
 
@@ -620,7 +751,7 @@ class FileScanStore extends Component implements ScanStoreInterface
         }
 
         $contents = file_get_contents($path);
-        if ($contents === false || trim($contents) === '') {
+        if ($contents === false || trim($contents) === "") {
             return null;
         }
 
@@ -635,13 +766,16 @@ class FileScanStore extends Component implements ScanStoreInterface
     {
         $this->ensureWritableDirectory(dirname($path));
 
-        $tmpPath = $path . '.tmp-' . bin2hex(random_bytes(6));
-        $fh = fopen($tmpPath, 'wb');
+        $tmpPath = $path . ".tmp-" . bin2hex(random_bytes(6));
+        $fh = fopen($tmpPath, "wb");
         if ($fh === false) {
-            $this->logStorageFailure('Unable to open temporary NDJSON file for writing.', [
-                'path' => $path,
-                'tmpPath' => $tmpPath,
-            ]);
+            $this->logStorageFailure(
+                "Unable to open temporary NDJSON file for writing.",
+                [
+                    "path" => $path,
+                    "tmpPath" => $tmpPath,
+                ],
+            );
             throw new Exception("Unable to open '{$path}' for writing.");
         }
 
@@ -649,19 +783,25 @@ class FileScanStore extends Component implements ScanStoreInterface
             foreach ($rows as $row) {
                 $written = fwrite($fh, Json::encode($row) . PHP_EOL);
                 if ($written === false) {
-                    $this->logStorageFailure('Unable to write NDJSON row to temporary scan file.', [
-                        'path' => $path,
-                        'tmpPath' => $tmpPath,
-                    ]);
+                    $this->logStorageFailure(
+                        "Unable to write NDJSON row to temporary scan file.",
+                        [
+                            "path" => $path,
+                            "tmpPath" => $tmpPath,
+                        ],
+                    );
                     throw new Exception("Unable to write '{$path}'.");
                 }
             }
 
             if (!fflush($fh)) {
-                $this->logStorageFailure('Unable to flush temporary NDJSON scan file.', [
-                    'path' => $path,
-                    'tmpPath' => $tmpPath,
-                ]);
+                $this->logStorageFailure(
+                    "Unable to flush temporary NDJSON scan file.",
+                    [
+                        "path" => $path,
+                        "tmpPath" => $tmpPath,
+                    ],
+                );
                 throw new Exception("Unable to flush '{$path}'.");
             }
         } finally {
@@ -671,15 +811,19 @@ class FileScanStore extends Component implements ScanStoreInterface
         if (!@rename($tmpPath, $path)) {
             $error = error_get_last();
             @unlink($tmpPath);
-            $this->logStorageFailure('Unable to move temporary NDJSON scan file into place.', [
-                'path' => $path,
-                'tmpPath' => $tmpPath,
-                'renameError' => $error['message'] ?? 'Unknown rename error.',
-            ]);
+            $this->logStorageFailure(
+                "Unable to move temporary NDJSON scan file into place.",
+                [
+                    "path" => $path,
+                    "tmpPath" => $tmpPath,
+                    "renameError" =>
+                        $error["message"] ?? "Unknown rename error.",
+                ],
+            );
             throw new Exception("Unable to finalize '{$path}' after writing.");
         }
 
-        $this->assertReadableFile($path, 'NDJSON file');
+        $this->assertReadableFile($path, "NDJSON file");
     }
 
     private function iterateNdjsonFile(string $path): \Generator
@@ -688,7 +832,7 @@ class FileScanStore extends Component implements ScanStoreInterface
             return;
         }
 
-        $fh = fopen($path, 'rb');
+        $fh = fopen($path, "rb");
         if ($fh === false) {
             return;
         }
@@ -696,7 +840,7 @@ class FileScanStore extends Component implements ScanStoreInterface
         try {
             while (($line = fgets($fh)) !== false) {
                 $line = trim($line);
-                if ($line === '') {
+                if ($line === "") {
                     continue;
                 }
 
@@ -719,9 +863,9 @@ class FileScanStore extends Component implements ScanStoreInterface
     {
         $this->ensureWritableDirectory(dirname($path));
 
-        $content = '';
+        $content = "";
         foreach ($lines as $line) {
-            $content .= trim((string)$line) . PHP_EOL;
+            $content .= trim((string) $line) . PHP_EOL;
         }
 
         $this->writeFileAtomically($path, $content);
@@ -733,7 +877,7 @@ class FileScanStore extends Component implements ScanStoreInterface
             return;
         }
 
-        $fh = fopen($path, 'rb');
+        $fh = fopen($path, "rb");
         if ($fh === false) {
             return;
         }
@@ -741,7 +885,7 @@ class FileScanStore extends Component implements ScanStoreInterface
         try {
             while (($line = fgets($fh)) !== false) {
                 $line = trim($line);
-                if ($line !== '') {
+                if ($line !== "") {
                     yield $line;
                 }
             }
@@ -754,28 +898,34 @@ class FileScanStore extends Component implements ScanStoreInterface
     {
         $this->ensureWritableDirectory(dirname($path));
 
-        $tmpPath = $path . '.tmp-' . bin2hex(random_bytes(6));
+        $tmpPath = $path . ".tmp-" . bin2hex(random_bytes(6));
         $bytesWritten = file_put_contents($tmpPath, $contents, LOCK_EX);
         if ($bytesWritten === false) {
-            $this->logStorageFailure('Unable to write temporary scan file.', [
-                'path' => $path,
-                'tmpPath' => $tmpPath,
+            $this->logStorageFailure("Unable to write temporary scan file.", [
+                "path" => $path,
+                "tmpPath" => $tmpPath,
             ]);
-            throw new Exception("Unable to write temporary file for '{$path}'.");
+            throw new Exception(
+                "Unable to write temporary file for '{$path}'.",
+            );
         }
 
         if (!@rename($tmpPath, $path)) {
             $error = error_get_last();
             @unlink($tmpPath);
-            $this->logStorageFailure('Unable to move temporary scan file into place.', [
-                'path' => $path,
-                'tmpPath' => $tmpPath,
-                'renameError' => $error['message'] ?? 'Unknown rename error.',
-            ]);
+            $this->logStorageFailure(
+                "Unable to move temporary scan file into place.",
+                [
+                    "path" => $path,
+                    "tmpPath" => $tmpPath,
+                    "renameError" =>
+                        $error["message"] ?? "Unknown rename error.",
+                ],
+            );
             throw new Exception("Unable to finalize '{$path}' after writing.");
         }
 
-        $this->assertReadableFile($path, 'scan file');
+        $this->assertReadableFile($path, "scan file");
     }
 
     private function ensureWritableDirectory(string $directory): void
@@ -783,27 +933,43 @@ class FileScanStore extends Component implements ScanStoreInterface
         try {
             FileHelper::createDirectory($directory);
         } catch (\Throwable $e) {
-            $this->logStorageFailure('Unable to create scan workspace directory.', [
-                'directory' => $directory,
-                'error' => $e->getMessage(),
-            ]);
-            throw new Exception("Unable to create scan workspace directory '{$directory}': " . $e->getMessage());
+            $this->logStorageFailure(
+                "Unable to create scan workspace directory.",
+                [
+                    "directory" => $directory,
+                    "error" => $e->getMessage(),
+                ],
+            );
+            throw new Exception(
+                "Unable to create scan workspace directory '{$directory}': " .
+                    $e->getMessage(),
+            );
         }
 
         clearstatcache(true, $directory);
 
         if (!is_dir($directory)) {
-            $this->logStorageFailure('Scan workspace directory does not exist after creation attempt.', [
-                'directory' => $directory,
-            ]);
-            throw new Exception("Scan workspace directory '{$directory}' does not exist after creation.");
+            $this->logStorageFailure(
+                "Scan workspace directory does not exist after creation attempt.",
+                [
+                    "directory" => $directory,
+                ],
+            );
+            throw new Exception(
+                "Scan workspace directory '{$directory}' does not exist after creation.",
+            );
         }
 
         if (!is_writable($directory)) {
-            $this->logStorageFailure('Scan workspace directory is not writable.', [
-                'directory' => $directory,
-            ]);
-            throw new Exception("Scan workspace directory '{$directory}' is not writable.");
+            $this->logStorageFailure(
+                "Scan workspace directory is not writable.",
+                [
+                    "directory" => $directory,
+                ],
+            );
+            throw new Exception(
+                "Scan workspace directory '{$directory}' is not writable.",
+            );
         }
     }
 
@@ -812,19 +978,29 @@ class FileScanStore extends Component implements ScanStoreInterface
         clearstatcache(true, $path);
 
         if (!is_file($path)) {
-            $this->logStorageFailure('Expected scan file was not found after writing.', [
-                'path' => $path,
-                'label' => $label,
-            ]);
-            throw new Exception("Expected {$label} at '{$path}' but it was not found after writing.");
+            $this->logStorageFailure(
+                "Expected scan file was not found after writing.",
+                [
+                    "path" => $path,
+                    "label" => $label,
+                ],
+            );
+            throw new Exception(
+                "Expected {$label} at '{$path}' but it was not found after writing.",
+            );
         }
 
         if (!is_readable($path)) {
-            $this->logStorageFailure('Expected scan file is not readable after writing.', [
-                'path' => $path,
-                'label' => $label,
-            ]);
-            throw new Exception("Expected {$label} at '{$path}' but it is not readable.");
+            $this->logStorageFailure(
+                "Expected scan file is not readable after writing.",
+                [
+                    "path" => $path,
+                    "label" => $label,
+                ],
+            );
+            throw new Exception(
+                "Expected {$label} at '{$path}' but it is not readable.",
+            );
         }
     }
 
@@ -834,22 +1010,27 @@ class FileScanStore extends Component implements ScanStoreInterface
         $metaPath = $scanId !== null ? $this->getMetaPath($scanId) : null;
 
         return [
-            'scanId' => $scanId,
-            'configuredWorkspacePath' => $this->getConfiguredWorkspacePath(),
-            'resolvedBaseStoragePath' => $this->getBaseStoragePath(),
-            'storageAlias' => Craft::getAlias('@storage', false),
-            'scansRootPath' => $this->getScansRootPath(),
-            'scanPath' => $scanPath,
-            'scanPathExists' => $scanPath !== null ? is_dir($scanPath) : null,
-            'metaPath' => $metaPath,
-            'metaPathExists' => $metaPath !== null ? is_file($metaPath) : null,
-            'phpSapi' => PHP_SAPI,
-            'hostname' => function_exists('gethostname') ? gethostname() : null,
+            "scanId" => $scanId,
+            "configuredWorkspacePath" => $this->getConfiguredWorkspacePath(),
+            "resolvedBaseStoragePath" => $this->getBaseStoragePath(),
+            "storageAlias" => Craft::getAlias("@storage", false),
+            "scansRootPath" => $this->getScansRootPath(),
+            "scanPath" => $scanPath,
+            "scanPathExists" => $scanPath !== null ? is_dir($scanPath) : null,
+            "metaPath" => $metaPath,
+            "metaPathExists" => $metaPath !== null ? is_file($metaPath) : null,
+            "phpSapi" => PHP_SAPI,
+            "hostname" => function_exists("gethostname") ? gethostname() : null,
         ];
     }
 
-    private function logStorageFailure(string $message, array $context = []): void
-    {
-        Logger::error($message, array_merge($this->buildStorageDiagnostics(), $context));
+    private function logStorageFailure(
+        string $message,
+        array $context = [],
+    ): void {
+        Logger::error(
+            $message,
+            array_merge($this->buildStorageDiagnostics(), $context),
+        );
     }
 }

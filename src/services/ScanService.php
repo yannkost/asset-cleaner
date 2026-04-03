@@ -7,6 +7,7 @@ namespace yann\assetcleaner\services;
 use Craft;
 use craft\base\Component;
 use craft\db\Query;
+use craft\db\Table;
 use craft\elements\Asset;
 use craft\elements\Entry;
 use craft\elements\GlobalSet;
@@ -25,15 +26,15 @@ use yann\assetcleaner\services\stores\ScanStoreInterface;
  */
 class ScanService extends Component
 {
-    public const STATUS_PENDING = 'pending';
-    public const STATUS_RUNNING = 'running';
-    public const STATUS_COMPLETE = 'complete';
-    public const STATUS_FAILED = 'failed';
+    public const STATUS_PENDING = "pending";
+    public const STATUS_RUNNING = "running";
+    public const STATUS_COMPLETE = "complete";
+    public const STATUS_FAILED = "failed";
 
-    public const STAGE_SETUP = 'setup';
-    public const STAGE_RELATIONS = 'relations';
-    public const STAGE_CONTENT = 'content';
-    public const STAGE_FINALIZE = 'finalize';
+    public const STAGE_SETUP = "setup";
+    public const STAGE_RELATIONS = "relations";
+    public const STAGE_CONTENT = "content";
+    public const STAGE_FINALIZE = "finalize";
 
     private const DEFAULT_ASSET_CHUNK_SIZE = 100;
     private const DEFAULT_ENTRY_BATCH_SIZE = 200;
@@ -51,6 +52,10 @@ class ScanService extends Component
      * @param string $scanId
      * @param array $volumeIds
      * @param int $assetChunkSize
+     * @param bool $includeDrafts
+     * @param bool $includeRevisions
+     * @param bool $countAllRelationsAsUsage
+     * @param int|null $initiatorId
      * @return void
      */
     public function initializeScan(
@@ -59,11 +64,12 @@ class ScanService extends Component
         int $assetChunkSize = self::DEFAULT_ASSET_CHUNK_SIZE,
         bool $includeDrafts = false,
         bool $includeRevisions = false,
-        ?int $initiatorId = null
+        bool $countAllRelationsAsUsage = true,
+        ?int $initiatorId = null,
     ): void {
         $scanId = trim($scanId);
-        if ($scanId === '') {
-            throw new \InvalidArgumentException('Missing scan ID.');
+        if ($scanId === "") {
+            throw new \InvalidArgumentException("Missing scan ID.");
         }
 
         $store = $this->getStore();
@@ -75,7 +81,8 @@ class ScanService extends Component
             self::DEFAULT_ENTRY_BATCH_SIZE,
             $includeDrafts,
             $includeRevisions,
-            $initiatorId
+            $countAllRelationsAsUsage,
+            $initiatorId,
         );
     }
 
@@ -201,29 +208,35 @@ class ScanService extends Component
         $meta = $store->getMeta($scanId);
 
         if ($meta === null) {
-            Logger::warning('Skipping scan setup stage because scan metadata could not be loaded.', [
-                'scanId' => $scanId,
-                'storageMode' => $this->getStorageMode(),
-            ]);
+            Logger::warning(
+                "Skipping scan setup stage because scan metadata could not be loaded.",
+                [
+                    "scanId" => $scanId,
+                    "storageMode" => $this->getStorageMode(),
+                ],
+            );
 
             return [
-                'totalAssets' => 0,
-                'totalChunks' => 0,
+                "totalAssets" => 0,
+                "totalChunks" => 0,
             ];
         }
 
-        $volumeIds = array_map('intval', $meta['volumeIds'] ?? []);
-        $chunkSize = max(1, (int)($meta['assetChunkSize'] ?? self::DEFAULT_ASSET_CHUNK_SIZE));
+        $volumeIds = array_map("intval", $meta["volumeIds"] ?? []);
+        $chunkSize = max(
+            1,
+            (int) ($meta["assetChunkSize"] ?? self::DEFAULT_ASSET_CHUNK_SIZE),
+        );
 
         $store->resetAssetSnapshot($scanId);
-        $store->replaceUsedIds($scanId, 'relations', []);
-        $store->replaceUsedIds($scanId, 'content', []);
-        $store->replaceUsedIds($scanId, 'final', []);
+        $store->replaceUsedIds($scanId, "relations", []);
+        $store->replaceUsedIds($scanId, "content", []);
+        $store->replaceUsedIds($scanId, "final", []);
         $store->resetResults($scanId);
 
         $query = Asset::find()
             ->status(null)
-            ->orderBy(['elements.id' => SORT_ASC]);
+            ->orderBy(["elements.id" => SORT_ASC]);
 
         if (!empty($volumeIds)) {
             $query->volumeId($volumeIds);
@@ -235,14 +248,14 @@ class ScanService extends Component
         $totalAssets = 0;
 
         $store->updateProgress($scanId, [
-            'status' => self::STATUS_RUNNING,
-            'stage' => self::STAGE_SETUP,
-            'progress' => 1,
-            'processedAssets' => 0,
-            'totalAssets' => 0,
-            'usedCount' => 0,
-            'unusedCount' => 0,
-            'error' => null,
+            "status" => self::STATUS_RUNNING,
+            "stage" => self::STAGE_SETUP,
+            "progress" => 1,
+            "processedAssets" => 0,
+            "totalAssets" => 0,
+            "usedCount" => 0,
+            "unusedCount" => 0,
+            "error" => null,
         ]);
 
         foreach ($query->each($chunkSize) as $asset) {
@@ -251,7 +264,11 @@ class ScanService extends Component
             $totalAssets++;
 
             if (count($currentChunk) >= $chunkSize) {
-                $store->storeAssetSnapshotChunk($scanId, $chunkIndex, $currentChunk);
+                $store->storeAssetSnapshotChunk(
+                    $scanId,
+                    $chunkIndex,
+                    $currentChunk,
+                );
                 $chunkIndex++;
                 $chunkCount++;
                 $currentChunk = [];
@@ -259,71 +276,77 @@ class ScanService extends Component
         }
 
         if (!empty($currentChunk)) {
-            $store->storeAssetSnapshotChunk($scanId, $chunkIndex, $currentChunk);
+            $store->storeAssetSnapshotChunk(
+                $scanId,
+                $chunkIndex,
+                $currentChunk,
+            );
             $chunkCount++;
         }
 
         $store->updateMeta($scanId, [
-            'status' => self::STATUS_RUNNING,
-            'stage' => self::STAGE_SETUP,
-            'totalAssets' => $totalAssets,
-            'totalChunks' => $chunkCount,
-            'processedAssets' => 0,
-            'usedCount' => 0,
-            'unusedCount' => 0,
-            'error' => null,
+            "status" => self::STATUS_RUNNING,
+            "stage" => self::STAGE_SETUP,
+            "totalAssets" => $totalAssets,
+            "totalChunks" => $chunkCount,
+            "processedAssets" => 0,
+            "usedCount" => 0,
+            "unusedCount" => 0,
+            "error" => null,
         ]);
 
         $progress = $totalAssets > 0 ? 10 : 100;
-        $status = $totalAssets > 0 ? self::STATUS_RUNNING : self::STATUS_COMPLETE;
+        $status =
+            $totalAssets > 0 ? self::STATUS_RUNNING : self::STATUS_COMPLETE;
 
         $store->updateProgress($scanId, [
-            'status' => $status,
-            'stage' => $totalAssets > 0 ? self::STAGE_SETUP : self::STAGE_FINALIZE,
-            'progress' => $progress,
-            'totalAssets' => $totalAssets,
-            'processedAssets' => 0,
-            'usedCount' => 0,
-            'unusedCount' => 0,
-            'error' => null,
+            "status" => $status,
+            "stage" =>
+                $totalAssets > 0 ? self::STAGE_SETUP : self::STAGE_FINALIZE,
+            "progress" => $progress,
+            "totalAssets" => $totalAssets,
+            "processedAssets" => 0,
+            "usedCount" => 0,
+            "unusedCount" => 0,
+            "error" => null,
         ]);
 
         if ($totalAssets === 0) {
             $completedAt = time();
 
-            $store->replaceUsedIds($scanId, 'relations', []);
-            $store->replaceUsedIds($scanId, 'content', []);
-            $store->replaceUsedIds($scanId, 'final', []);
+            $store->replaceUsedIds($scanId, "relations", []);
+            $store->replaceUsedIds($scanId, "content", []);
+            $store->replaceUsedIds($scanId, "final", []);
             $store->resetResults($scanId);
 
             $store->updateMeta($scanId, [
-                'status' => self::STATUS_COMPLETE,
-                'stage' => self::STAGE_FINALIZE,
-                'completedAt' => $completedAt,
-                'totalAssets' => 0,
-                'processedAssets' => 0,
-                'usedCount' => 0,
-                'unusedCount' => 0,
-                'error' => null,
+                "status" => self::STATUS_COMPLETE,
+                "stage" => self::STAGE_FINALIZE,
+                "completedAt" => $completedAt,
+                "totalAssets" => 0,
+                "processedAssets" => 0,
+                "usedCount" => 0,
+                "unusedCount" => 0,
+                "error" => null,
             ]);
 
             $store->updateProgress($scanId, [
-                'status' => self::STATUS_COMPLETE,
-                'stage' => self::STAGE_FINALIZE,
-                'progress' => 100,
-                'totalAssets' => 0,
-                'processedAssets' => 0,
-                'usedCount' => 0,
-                'unusedCount' => 0,
-                'error' => null,
+                "status" => self::STATUS_COMPLETE,
+                "stage" => self::STAGE_FINALIZE,
+                "progress" => 100,
+                "totalAssets" => 0,
+                "processedAssets" => 0,
+                "usedCount" => 0,
+                "unusedCount" => 0,
+                "error" => null,
             ]);
 
             $store->setLastScan($scanId, $completedAt);
         }
 
         return [
-            'totalAssets' => $totalAssets,
-            'totalChunks' => $chunkCount,
+            "totalAssets" => $totalAssets,
+            "totalChunks" => $chunkCount,
         ];
     }
 
@@ -341,42 +364,63 @@ class ScanService extends Component
         $meta = $store->getMeta($scanId);
 
         if ($meta === null) {
-            Logger::warning('Skipping relations stage because scan metadata could not be loaded.', [
-                'scanId' => $scanId,
-                'storageMode' => $this->getStorageMode(),
-            ]);
+            Logger::warning(
+                "Skipping relations stage because scan metadata could not be loaded.",
+                [
+                    "scanId" => $scanId,
+                    "storageMode" => $this->getStorageMode(),
+                ],
+            );
 
             return 0;
         }
 
-        $chunkSize = max(1, (int)($meta['assetChunkSize'] ?? self::DEFAULT_ASSET_CHUNK_SIZE));
-        $totalChunks = max(1, (int)($meta['totalChunks'] ?? 1));
-        $includeDrafts = !empty($meta['includeDrafts']);
-        $includeRevisions = !empty($meta['includeRevisions']);
-        $initiatingUserId = isset($meta['initiatingUserId']) ? (int)$meta['initiatingUserId'] : null;
+        $chunkSize = max(
+            1,
+            (int) ($meta["assetChunkSize"] ?? self::DEFAULT_ASSET_CHUNK_SIZE),
+        );
+        $totalChunks = max(1, (int) ($meta["totalChunks"] ?? 1));
+        $includeDrafts = !empty($meta["includeDrafts"]);
+        $includeRevisions = !empty($meta["includeRevisions"]);
+        $countAllRelationsAsUsage = array_key_exists(
+            "countAllRelationsAsUsage",
+            $meta,
+        )
+            ? !empty($meta["countAllRelationsAsUsage"])
+            : true;
+        $initiatingUserId = isset($meta["initiatingUserId"])
+            ? (int) $meta["initiatingUserId"]
+            : null;
 
         $usedIds = [];
         $currentAssetIds = [];
         $chunkIndex = 0;
 
-        $store->replaceUsedIds($scanId, 'relations', []);
+        $store->replaceUsedIds($scanId, "relations", []);
 
         foreach ($store->iterateAssetSnapshot($scanId) as $row) {
-            if (!is_array($row) || !isset($row['id'])) {
+            if (!is_array($row) || !isset($row["id"])) {
                 continue;
             }
 
-            $currentAssetIds[] = (int)$row['id'];
+            $currentAssetIds[] = (int) $row["id"];
 
             if (count($currentAssetIds) >= $chunkSize) {
-                $this->collectRelationChunk($currentAssetIds, $usedIds, $includeDrafts, $includeRevisions, $initiatingUserId);
-                $ratio = (++$chunkIndex) / $totalChunks;
+                $this->collectRelationChunk(
+                    $currentAssetIds,
+                    $usedIds,
+                    $includeDrafts,
+                    $includeRevisions,
+                    $countAllRelationsAsUsage,
+                    $initiatingUserId,
+                );
+                $ratio = ++$chunkIndex / $totalChunks;
 
                 $store->updateProgress($scanId, [
-                    'status' => self::STATUS_RUNNING,
-                    'stage' => self::STAGE_RELATIONS,
-                    'progress' => $this->scaleProgress($ratio, 10, 25),
-                    'usedCount' => count($usedIds),
+                    "status" => self::STATUS_RUNNING,
+                    "stage" => self::STAGE_RELATIONS,
+                    "progress" => $this->scaleProgress($ratio, 10, 25),
+                    "usedCount" => count($usedIds),
                 ]);
 
                 $currentAssetIds = [];
@@ -384,33 +428,40 @@ class ScanService extends Component
         }
 
         if (!empty($currentAssetIds)) {
-            $this->collectRelationChunk($currentAssetIds, $usedIds, $includeDrafts, $includeRevisions, $initiatingUserId);
-            $ratio = (++$chunkIndex) / $totalChunks;
+            $this->collectRelationChunk(
+                $currentAssetIds,
+                $usedIds,
+                $includeDrafts,
+                $includeRevisions,
+                $countAllRelationsAsUsage,
+                $initiatingUserId,
+            );
+            $ratio = ++$chunkIndex / $totalChunks;
 
             $store->updateProgress($scanId, [
-                'status' => self::STATUS_RUNNING,
-                'stage' => self::STAGE_RELATIONS,
-                'progress' => $this->scaleProgress($ratio, 10, 25),
-                'usedCount' => count($usedIds),
+                "status" => self::STATUS_RUNNING,
+                "stage" => self::STAGE_RELATIONS,
+                "progress" => $this->scaleProgress($ratio, 10, 25),
+                "usedCount" => count($usedIds),
             ]);
         }
 
-        $uniqueIds = array_map('intval', array_keys($usedIds));
+        $uniqueIds = array_map("intval", array_keys($usedIds));
         sort($uniqueIds, SORT_NUMERIC);
 
-        $store->replaceUsedIds($scanId, 'relations', $uniqueIds);
+        $store->replaceUsedIds($scanId, "relations", $uniqueIds);
 
         $store->updateMeta($scanId, [
-            'status' => self::STATUS_RUNNING,
-            'stage' => self::STAGE_RELATIONS,
-            'usedCount' => count($uniqueIds),
+            "status" => self::STATUS_RUNNING,
+            "stage" => self::STAGE_RELATIONS,
+            "usedCount" => count($uniqueIds),
         ]);
 
         $store->updateProgress($scanId, [
-            'status' => self::STATUS_RUNNING,
-            'stage' => self::STAGE_RELATIONS,
-            'progress' => 25,
-            'usedCount' => count($uniqueIds),
+            "status" => self::STATUS_RUNNING,
+            "stage" => self::STAGE_RELATIONS,
+            "progress" => 25,
+            "usedCount" => count($uniqueIds),
         ]);
 
         return count($uniqueIds);
@@ -430,72 +481,101 @@ class ScanService extends Component
         $meta = $store->getMeta($scanId);
 
         if ($meta === null) {
-            Logger::warning('Skipping content stage because scan metadata could not be loaded.', [
-                'scanId' => $scanId,
-                'storageMode' => $this->getStorageMode(),
-            ]);
+            Logger::warning(
+                "Skipping content stage because scan metadata could not be loaded.",
+                [
+                    "scanId" => $scanId,
+                    "storageMode" => $this->getStorageMode(),
+                ],
+            );
 
             return 0;
         }
 
-        $includeDrafts = !empty($meta['includeDrafts']);
-        $includeRevisions = !empty($meta['includeRevisions']);
-        $initiatingUserId = isset($meta['initiatingUserId']) ? (int)$meta['initiatingUserId'] : null;
+        $includeDrafts = !empty($meta["includeDrafts"]);
+        $includeRevisions = !empty($meta["includeRevisions"]);
+        $initiatingUserId = isset($meta["initiatingUserId"])
+            ? (int) $meta["initiatingUserId"]
+            : null;
 
         $lookups = $this->buildAssetLookups($scanId);
-        $scannedIds = $lookups['scannedIds'];
-        $pathLookup = $lookups['pathLookup'];
-        $filenameLookup = $lookups['filenameLookup'];
+        $scannedIds = $lookups["scannedIds"];
+        $pathLookup = $lookups["pathLookup"];
+        $filenameLookup = $lookups["filenameLookup"];
 
         $usedIds = [];
-        $store->replaceUsedIds($scanId, 'content', []);
+        $store->replaceUsedIds($scanId, "content", []);
 
         $htmlFields = $this->getHtmlFields();
         if (empty($htmlFields)) {
             $store->updateMeta($scanId, [
-                'status' => self::STATUS_RUNNING,
-                'stage' => self::STAGE_CONTENT,
+                "status" => self::STATUS_RUNNING,
+                "stage" => self::STAGE_CONTENT,
             ]);
 
             $store->updateProgress($scanId, [
-                'status' => self::STATUS_RUNNING,
-                'stage' => self::STAGE_CONTENT,
-                'progress' => 75,
+                "status" => self::STATUS_RUNNING,
+                "stage" => self::STAGE_CONTENT,
+                "progress" => 75,
             ]);
 
             return 0;
         }
 
-        $fieldIds = array_values(array_filter(array_map(
-            static fn($field) => (int)($field->id ?? 0),
-            $htmlFields
-        )));
+        $fieldIds = array_values(
+            array_filter(
+                array_map(
+                    static fn($field) => (int) ($field->id ?? 0),
+                    $htmlFields,
+                ),
+            ),
+        );
         $relevantTypeIds = $this->getEntryTypeIdsWithFields($fieldIds);
 
-        $entryBatchSize = max(1, (int)($meta['entryBatchSize'] ?? self::DEFAULT_ENTRY_BATCH_SIZE));
-        $entries = $this->loadEntriesForContentScan($relevantTypeIds, $includeDrafts, $includeRevisions, $initiatingUserId);
+        $entryBatchSize = max(
+            1,
+            (int) ($meta["entryBatchSize"] ?? self::DEFAULT_ENTRY_BATCH_SIZE),
+        );
+        $entries = $this->loadEntriesForContentScan(
+            $relevantTypeIds,
+            $includeDrafts,
+            $includeRevisions,
+            $initiatingUserId,
+        );
         $totalEntries = count($entries);
         $processedEntries = 0;
 
         $store->updateProgress($scanId, [
-            'status' => self::STATUS_RUNNING,
-            'stage' => self::STAGE_CONTENT,
-            'progress' => 25,
+            "status" => self::STATUS_RUNNING,
+            "stage" => self::STAGE_CONTENT,
+            "progress" => 25,
         ]);
 
         if ($totalEntries > 0) {
             foreach ($entries as $entry) {
                 /** @var Entry $entry */
-                if ($this->resolveUsageEntryForContent($entry, $includeDrafts, $includeRevisions) === null) {
+                $resolvedEntry = Plugin::getInstance()->assetUsage->resolveUsageEntry(
+                    $entry,
+                    $includeDrafts,
+                    $includeRevisions,
+                );
+
+                if ($resolvedEntry === null) {
                     $processedEntries++;
-                    if (($processedEntries % 25) === 0 || $processedEntries === $totalEntries) {
-                        $ratio = $totalEntries > 0 ? ($processedEntries / $totalEntries) : 1.0;
+                    if (
+                        $processedEntries % 25 === 0 ||
+                        $processedEntries === $totalEntries
+                    ) {
+                        $ratio =
+                            $totalEntries > 0
+                                ? $processedEntries / $totalEntries
+                                : 1.0;
 
                         $store->updateProgress($scanId, [
-                            'status' => self::STATUS_RUNNING,
-                            'stage' => self::STAGE_CONTENT,
-                            'progress' => $this->scaleProgress($ratio, 25, 70),
-                            'usedCount' => count($usedIds),
+                            "status" => self::STATUS_RUNNING,
+                            "stage" => self::STAGE_CONTENT,
+                            "progress" => $this->scaleProgress($ratio, 25, 70),
+                            "usedCount" => count($usedIds),
                         ]);
                     }
                     continue;
@@ -509,24 +589,38 @@ class ScanService extends Component
                     }
 
                     $content = $this->normalizeFieldValueToString($fieldValue);
-                    if ($content === '') {
+                    if ($content === "") {
                         continue;
                     }
 
-                    foreach ($this->extractReferencedAssetIds($content, $scannedIds, $pathLookup, $filenameLookup) as $assetId) {
+                    foreach (
+                        $this->extractReferencedAssetIds(
+                            $content,
+                            $scannedIds,
+                            $pathLookup,
+                            $filenameLookup,
+                        )
+                        as $assetId
+                    ) {
                         $usedIds[$assetId] = true;
                     }
                 }
 
                 $processedEntries++;
-                if (($processedEntries % 25) === 0 || $processedEntries === $totalEntries) {
-                    $ratio = $totalEntries > 0 ? ($processedEntries / $totalEntries) : 1.0;
+                if (
+                    $processedEntries % 25 === 0 ||
+                    $processedEntries === $totalEntries
+                ) {
+                    $ratio =
+                        $totalEntries > 0
+                            ? $processedEntries / $totalEntries
+                            : 1.0;
 
                     $store->updateProgress($scanId, [
-                        'status' => self::STATUS_RUNNING,
-                        'stage' => self::STAGE_CONTENT,
-                        'progress' => $this->scaleProgress($ratio, 25, 70),
-                        'usedCount' => count($usedIds),
+                        "status" => self::STATUS_RUNNING,
+                        "stage" => self::STAGE_CONTENT,
+                        "progress" => $this->scaleProgress($ratio, 25, 70),
+                        "usedCount" => count($usedIds),
                     ]);
                 }
             }
@@ -544,33 +638,43 @@ class ScanService extends Component
                     continue;
                 }
 
-                $content = $this->normalizeFieldValueToString($globalSet->getFieldValue($field->handle));
-                if ($content === '') {
+                $content = $this->normalizeFieldValueToString(
+                    $globalSet->getFieldValue($field->handle),
+                );
+                if ($content === "") {
                     continue;
                 }
 
-                foreach ($this->extractReferencedAssetIds($content, $scannedIds, $pathLookup, $filenameLookup) as $assetId) {
+                foreach (
+                    $this->extractReferencedAssetIds(
+                        $content,
+                        $scannedIds,
+                        $pathLookup,
+                        $filenameLookup,
+                    )
+                    as $assetId
+                ) {
                     $usedIds[$assetId] = true;
                 }
             }
         }
 
-        $uniqueIds = array_map('intval', array_keys($usedIds));
+        $uniqueIds = array_map("intval", array_keys($usedIds));
         sort($uniqueIds, SORT_NUMERIC);
 
-        $store->replaceUsedIds($scanId, 'content', $uniqueIds);
+        $store->replaceUsedIds($scanId, "content", $uniqueIds);
 
         $store->updateMeta($scanId, [
-            'status' => self::STATUS_RUNNING,
-            'stage' => self::STAGE_CONTENT,
-            'usedCount' => count($uniqueIds),
+            "status" => self::STATUS_RUNNING,
+            "stage" => self::STAGE_CONTENT,
+            "usedCount" => count($uniqueIds),
         ]);
 
         $store->updateProgress($scanId, [
-            'status' => self::STATUS_RUNNING,
-            'stage' => self::STAGE_CONTENT,
-            'progress' => 75,
-            'usedCount' => count($uniqueIds),
+            "status" => self::STATUS_RUNNING,
+            "stage" => self::STAGE_CONTENT,
+            "progress" => 75,
+            "usedCount" => count($uniqueIds),
         ]);
 
         return count($uniqueIds);
@@ -590,54 +694,64 @@ class ScanService extends Component
         $meta = $store->getMeta($scanId);
 
         if ($meta === null) {
-            Logger::warning('Skipping finalize stage because scan metadata could not be loaded.', [
-                'scanId' => $scanId,
-                'storageMode' => $this->getStorageMode(),
-            ]);
+            Logger::warning(
+                "Skipping finalize stage because scan metadata could not be loaded.",
+                [
+                    "scanId" => $scanId,
+                    "storageMode" => $this->getStorageMode(),
+                ],
+            );
 
             return [
-                'usedCount' => 0,
-                'unusedCount' => 0,
+                "usedCount" => 0,
+                "unusedCount" => 0,
             ];
         }
 
-        $totalAssets = (int)($meta['totalAssets'] ?? 0);
+        $totalAssets = (int) ($meta["totalAssets"] ?? 0);
         $usedIds = $store->getMergedUsedIds($scanId);
         $usedLookup = array_fill_keys($usedIds, true);
 
-        $store->replaceUsedIds($scanId, 'final', $usedIds);
+        $store->replaceUsedIds($scanId, "final", $usedIds);
         $store->resetResults($scanId);
 
         $unusedIds = [];
         $processedAssets = 0;
 
         foreach ($store->iterateAssetSnapshot($scanId) as $row) {
-            if (!is_array($row) || !isset($row['id'])) {
+            if (!is_array($row) || !isset($row["id"])) {
                 continue;
             }
 
-            $assetId = (int)$row['id'];
+            $assetId = (int) $row["id"];
             if (!isset($usedLookup[$assetId])) {
                 $unusedIds[] = $assetId;
             }
 
             $processedAssets++;
-            if (($processedAssets % 100) === 0 || $processedAssets === $totalAssets) {
-                $ratio = $totalAssets > 0 ? ($processedAssets / $totalAssets) : 1.0;
+            if (
+                $processedAssets % 100 === 0 ||
+                $processedAssets === $totalAssets
+            ) {
+                $ratio =
+                    $totalAssets > 0 ? $processedAssets / $totalAssets : 1.0;
 
                 $store->updateProgress($scanId, [
-                    'status' => self::STATUS_RUNNING,
-                    'stage' => self::STAGE_FINALIZE,
-                    'progress' => $this->scaleProgress($ratio, 75, 95),
-                    'processedAssets' => $processedAssets,
-                    'usedCount' => count($usedIds),
-                    'unusedCount' => count($unusedIds),
+                    "status" => self::STATUS_RUNNING,
+                    "stage" => self::STAGE_FINALIZE,
+                    "progress" => $this->scaleProgress($ratio, 75, 95),
+                    "processedAssets" => $processedAssets,
+                    "usedCount" => count($usedIds),
+                    "unusedCount" => count($unusedIds),
                 ]);
             }
         }
 
         $unusedCount = 0;
-        foreach (array_chunk($unusedIds, self::DEFAULT_RESULT_QUERY_CHUNK_SIZE) as $idChunk) {
+        foreach (
+            array_chunk($unusedIds, self::DEFAULT_RESULT_QUERY_CHUNK_SIZE)
+            as $idChunk
+        ) {
             $rows = $this->buildUnusedAssetRows($idChunk);
             $unusedCount += count($rows);
             $store->appendResultRows($scanId, $rows);
@@ -646,30 +760,30 @@ class ScanService extends Component
         $completedAt = time();
 
         $store->updateMeta($scanId, [
-            'status' => self::STATUS_COMPLETE,
-            'stage' => self::STAGE_FINALIZE,
-            'completedAt' => $completedAt,
-            'processedAssets' => $totalAssets,
-            'usedCount' => count($usedIds),
-            'unusedCount' => $unusedCount,
-            'error' => null,
+            "status" => self::STATUS_COMPLETE,
+            "stage" => self::STAGE_FINALIZE,
+            "completedAt" => $completedAt,
+            "processedAssets" => $totalAssets,
+            "usedCount" => count($usedIds),
+            "unusedCount" => $unusedCount,
+            "error" => null,
         ]);
 
         $store->updateProgress($scanId, [
-            'status' => self::STATUS_COMPLETE,
-            'stage' => self::STAGE_FINALIZE,
-            'progress' => 100,
-            'processedAssets' => $totalAssets,
-            'usedCount' => count($usedIds),
-            'unusedCount' => $unusedCount,
-            'error' => null,
+            "status" => self::STATUS_COMPLETE,
+            "stage" => self::STAGE_FINALIZE,
+            "progress" => 100,
+            "processedAssets" => $totalAssets,
+            "usedCount" => count($usedIds),
+            "unusedCount" => $unusedCount,
+            "error" => null,
         ]);
 
         $store->setLastScan($scanId, $completedAt);
 
         return [
-            'usedCount' => count($usedIds),
-            'unusedCount' => $unusedCount,
+            "usedCount" => count($usedIds),
+            "unusedCount" => $unusedCount,
         ];
     }
 
@@ -682,7 +796,10 @@ class ScanService extends Component
      */
     public function failScan(string $scanId, \Throwable|string $error): void
     {
-        $message = $error instanceof \Throwable ? $error->getMessage() : (string)$error;
+        $message =
+            $error instanceof \Throwable
+                ? $error->getMessage()
+                : (string) $error;
         $this->getStore()->failScan($scanId, $message);
     }
 
@@ -695,11 +812,23 @@ class ScanService extends Component
     public function getStageLabel(string $stage): string
     {
         return match ($stage) {
-            self::STAGE_SETUP => Craft::t('asset-cleaner', 'Preparing asset snapshot...'),
-            self::STAGE_RELATIONS => Craft::t('asset-cleaner', 'Scanning relations...'),
-            self::STAGE_CONTENT => Craft::t('asset-cleaner', 'Scanning content...'),
-            self::STAGE_FINALIZE => Craft::t('asset-cleaner', 'Finalizing results...'),
-            default => Craft::t('asset-cleaner', 'Scanning...'),
+            self::STAGE_SETUP => Craft::t(
+                "asset-cleaner",
+                "Preparing asset snapshot...",
+            ),
+            self::STAGE_RELATIONS => Craft::t(
+                "asset-cleaner",
+                "Scanning relations...",
+            ),
+            self::STAGE_CONTENT => Craft::t(
+                "asset-cleaner",
+                "Scanning content...",
+            ),
+            self::STAGE_FINALIZE => Craft::t(
+                "asset-cleaner",
+                "Finalizing results...",
+            ),
+            default => Craft::t("asset-cleaner", "Scanning..."),
         };
     }
 
@@ -750,25 +879,39 @@ class ScanService extends Component
         $configuredMode = null;
 
         try {
-            $config = Craft::$app->getConfig()->getConfigFromFile('asset-cleaner');
-            if (is_array($config) && isset($config['scanStorageMode']) && is_string($config['scanStorageMode'])) {
-                $configuredMode = trim(Craft::parseEnv($config['scanStorageMode']));
+            $config = Craft::$app
+                ->getConfig()
+                ->getConfigFromFile("asset-cleaner");
+            if (
+                is_array($config) &&
+                isset($config["scanStorageMode"]) &&
+                is_string($config["scanStorageMode"])
+            ) {
+                $configuredMode = trim(
+                    Craft::parseEnv($config["scanStorageMode"]),
+                );
             }
         } catch (\Throwable $e) {
-            Logger::warning('Could not load Asset Cleaner config while resolving scan storage mode.', [
-                'error' => $e->getMessage(),
-            ]);
+            Logger::warning(
+                "Could not load Asset Cleaner config while resolving scan storage mode.",
+                [
+                    "error" => $e->getMessage(),
+                ],
+            );
         }
 
-        $envMode = getenv('ASSET_CLEANER_SCAN_STORAGE_MODE');
-        if (is_string($envMode) && trim($envMode) !== '') {
+        $envMode = getenv("ASSET_CLEANER_SCAN_STORAGE_MODE");
+        if (is_string($envMode) && trim($envMode) !== "") {
             $configuredMode = trim($envMode);
         }
 
-        return in_array($configuredMode, [
-            Settings::STORAGE_MODE_FILE,
-            Settings::STORAGE_MODE_DATABASE,
-        ], true) ? $configuredMode : null;
+        return in_array(
+            $configuredMode,
+            [Settings::STORAGE_MODE_FILE, Settings::STORAGE_MODE_DATABASE],
+            true,
+        )
+            ? $configuredMode
+            : null;
     }
 
     /**
@@ -785,26 +928,34 @@ class ScanService extends Component
         $configuredValue = null;
 
         try {
-            $config = Craft::$app->getConfig()->getConfigFromFile('asset-cleaner');
-            if (is_array($config) && array_key_exists('includeDraftsByDefault', $config)) {
+            $config = Craft::$app
+                ->getConfig()
+                ->getConfigFromFile("asset-cleaner");
+            if (
+                is_array($config) &&
+                array_key_exists("includeDraftsByDefault", $config)
+            ) {
                 $configuredValue = filter_var(
-                    Craft::parseEnv((string)$config['includeDraftsByDefault']),
+                    Craft::parseEnv((string) $config["includeDraftsByDefault"]),
                     FILTER_VALIDATE_BOOLEAN,
-                    FILTER_NULL_ON_FAILURE
+                    FILTER_NULL_ON_FAILURE,
                 );
             }
         } catch (\Throwable $e) {
-            Logger::warning('Could not load Asset Cleaner config while resolving draft inclusion defaults.', [
-                'error' => $e->getMessage(),
-            ]);
+            Logger::warning(
+                "Could not load Asset Cleaner config while resolving draft inclusion defaults.",
+                [
+                    "error" => $e->getMessage(),
+                ],
+            );
         }
 
-        $envValue = getenv('ASSET_CLEANER_INCLUDE_DRAFTS');
-        if (is_string($envValue) && trim($envValue) !== '') {
+        $envValue = getenv("ASSET_CLEANER_INCLUDE_DRAFTS");
+        if (is_string($envValue) && trim($envValue) !== "") {
             $configuredValue = filter_var(
                 trim($envValue),
                 FILTER_VALIDATE_BOOLEAN,
-                FILTER_NULL_ON_FAILURE
+                FILTER_NULL_ON_FAILURE,
             );
         }
 
@@ -825,26 +976,36 @@ class ScanService extends Component
         $configuredValue = null;
 
         try {
-            $config = Craft::$app->getConfig()->getConfigFromFile('asset-cleaner');
-            if (is_array($config) && array_key_exists('includeRevisionsByDefault', $config)) {
+            $config = Craft::$app
+                ->getConfig()
+                ->getConfigFromFile("asset-cleaner");
+            if (
+                is_array($config) &&
+                array_key_exists("includeRevisionsByDefault", $config)
+            ) {
                 $configuredValue = filter_var(
-                    Craft::parseEnv((string)$config['includeRevisionsByDefault']),
+                    Craft::parseEnv(
+                        (string) $config["includeRevisionsByDefault"],
+                    ),
                     FILTER_VALIDATE_BOOLEAN,
-                    FILTER_NULL_ON_FAILURE
+                    FILTER_NULL_ON_FAILURE,
                 );
             }
         } catch (\Throwable $e) {
-            Logger::warning('Could not load Asset Cleaner config while resolving revision inclusion defaults.', [
-                'error' => $e->getMessage(),
-            ]);
+            Logger::warning(
+                "Could not load Asset Cleaner config while resolving revision inclusion defaults.",
+                [
+                    "error" => $e->getMessage(),
+                ],
+            );
         }
 
-        $envValue = getenv('ASSET_CLEANER_INCLUDE_REVISIONS');
-        if (is_string($envValue) && trim($envValue) !== '') {
+        $envValue = getenv("ASSET_CLEANER_INCLUDE_REVISIONS");
+        if (is_string($envValue) && trim($envValue) !== "") {
             $configuredValue = filter_var(
                 trim($envValue),
                 FILTER_VALIDATE_BOOLEAN,
-                FILTER_NULL_ON_FAILURE
+                FILTER_NULL_ON_FAILURE,
             );
         }
 
@@ -852,8 +1013,6 @@ class ScanService extends Component
     }
 
     /**
-     * Build a normalized asset snapshot row.
-     *
      * @param Asset $asset
      * @return array
      */
@@ -866,7 +1025,10 @@ class ScanService extends Component
             $volume = $asset->getVolume();
             if ($volume) {
                 $volumeHandle = $volume->handle;
-                $volumePathPrefixes = $this->buildVolumePathPrefixes($volume, $volumeHandle);
+                $volumePathPrefixes = $this->buildVolumePathPrefixes(
+                    $volume,
+                    $volumeHandle,
+                );
             }
         } catch (\Throwable) {
             $volumeHandle = null;
@@ -874,12 +1036,18 @@ class ScanService extends Component
         }
 
         return [
-            'id' => (int)$asset->id,
-            'filename' => (string)$asset->filename,
-            'volumeId' => (int)$asset->volumeId,
-            'volumeHandle' => $volumeHandle,
-            'folderPath' => (string)($asset->folderPath ?? ''),
-            'pathCandidates' => array_values($this->buildAssetPathCandidates($asset, $volumeHandle, $volumePathPrefixes)),
+            "id" => (int) $asset->id,
+            "filename" => (string) $asset->filename,
+            "volumeId" => (int) $asset->volumeId,
+            "volumeHandle" => $volumeHandle,
+            "folderPath" => (string) ($asset->folderPath ?? ""),
+            "pathCandidates" => array_values(
+                $this->buildAssetPathCandidates(
+                    $asset,
+                    $volumeHandle,
+                    $volumePathPrefixes,
+                ),
+            ),
         ];
     }
 
@@ -889,34 +1057,42 @@ class ScanService extends Component
      * @param array $volumePathPrefixes
      * @return array<string,string>
      */
-    private function buildAssetPathCandidates(Asset $asset, ?string $volumeHandle, array $volumePathPrefixes = []): array
-    {
+    private function buildAssetPathCandidates(
+        Asset $asset,
+        ?string $volumeHandle,
+        array $volumePathPrefixes = [],
+    ): array {
         $candidates = [];
 
-        $filename = trim((string)$asset->filename);
-        if ($filename === '') {
+        $filename = trim((string) $asset->filename);
+        if ($filename === "") {
             return [];
         }
 
-        $folderPath = trim((string)($asset->folderPath ?? ''), '/');
-        $relativePath = $folderPath !== ''
-            ? $folderPath . '/' . $filename
-            : $filename;
+        $folderPath = trim((string) ($asset->folderPath ?? ""), "/");
+        $relativePath =
+            $folderPath !== "" ? $folderPath . "/" . $filename : $filename;
 
         foreach ($this->normalizePathCandidates($relativePath) as $candidate) {
             $candidates[$candidate] = $candidate;
         }
 
         if ($volumeHandle) {
-            $volumeRelative = trim($volumeHandle . '/' . $relativePath, '/');
-            foreach ($this->normalizePathCandidates($volumeRelative) as $candidate) {
+            $volumeRelative = trim($volumeHandle . "/" . $relativePath, "/");
+            foreach (
+                $this->normalizePathCandidates($volumeRelative)
+                as $candidate
+            ) {
                 $candidates[$candidate] = $candidate;
             }
         }
 
         foreach ($volumePathPrefixes as $prefix) {
-            $prefixedPath = trim($prefix . '/' . $relativePath, '/');
-            foreach ($this->normalizePathCandidates($prefixedPath) as $candidate) {
+            $prefixedPath = trim($prefix . "/" . $relativePath, "/");
+            foreach (
+                $this->normalizePathCandidates($prefixedPath)
+                as $candidate
+            ) {
                 $candidates[$candidate] = $candidate;
             }
         }
@@ -929,8 +1105,10 @@ class ScanService extends Component
      * @param string|null $volumeHandle
      * @return array<int,string>
      */
-    private function buildVolumePathPrefixes(mixed $volume, ?string $volumeHandle): array
-    {
+    private function buildVolumePathPrefixes(
+        mixed $volume,
+        ?string $volumeHandle,
+    ): array {
         $prefixes = [];
 
         if ($volumeHandle) {
@@ -940,20 +1118,20 @@ class ScanService extends Component
         try {
             $fs = $volume?->getFs();
             if ($fs) {
-                if (method_exists($fs, 'getRootUrl')) {
+                if (method_exists($fs, "getRootUrl")) {
                     $rootUrl = $fs->getRootUrl();
-                    if (is_string($rootUrl) && $rootUrl !== '') {
+                    if (is_string($rootUrl) && $rootUrl !== "") {
                         $rootPath = parse_url($rootUrl, PHP_URL_PATH);
-                        if (is_string($rootPath) && $rootPath !== '') {
-                            $prefixes[] = trim($rootPath, '/');
+                        if (is_string($rootPath) && $rootPath !== "") {
+                            $prefixes[] = trim($rootPath, "/");
                         }
                     }
                 }
 
-                if (method_exists($fs, 'getRootPath')) {
+                if (method_exists($fs, "getRootPath")) {
                     $rootPath = $fs->getRootPath();
-                    if (is_string($rootPath) && $rootPath !== '') {
-                        $prefixes[] = trim(basename($rootPath), '/');
+                    if (is_string($rootPath) && $rootPath !== "") {
+                        $prefixes[] = trim(basename($rootPath), "/");
                     }
                 }
             }
@@ -961,7 +1139,11 @@ class ScanService extends Component
             // Ignore inaccessible FS metadata.
         }
 
-        return array_values(array_unique(array_filter($prefixes, static fn($prefix) => $prefix !== '')));
+        return array_values(
+            array_unique(
+                array_filter($prefixes, static fn($prefix) => $prefix !== ""),
+            ),
+        );
     }
 
     /**
@@ -981,22 +1163,25 @@ class ScanService extends Component
         $filenameLookup = [];
 
         foreach ($this->getStore()->iterateAssetSnapshot($scanId) as $row) {
-            if (!is_array($row) || !isset($row['id'])) {
+            if (!is_array($row) || !isset($row["id"])) {
                 continue;
             }
 
-            $assetId = (int)$row['id'];
+            $assetId = (int) $row["id"];
             $scannedIds[$assetId] = true;
 
-            $filename = trim((string)($row['filename'] ?? ''));
-            if ($filename !== '') {
+            $filename = trim((string) ($row["filename"] ?? ""));
+            if ($filename !== "") {
                 $key = mb_strtolower($filename);
                 $filenameLookup[$key] ??= [];
                 $filenameLookup[$key][] = $assetId;
             }
 
-            foreach ((array)($row['pathCandidates'] ?? []) as $candidate) {
-                foreach ($this->normalizePathCandidates((string)$candidate) as $variant) {
+            foreach ((array) ($row["pathCandidates"] ?? []) as $candidate) {
+                foreach (
+                    $this->normalizePathCandidates((string) $candidate)
+                    as $variant
+                ) {
                     $pathLookup[$variant] ??= [];
                     $pathLookup[$variant][] = $assetId;
                 }
@@ -1004,17 +1189,21 @@ class ScanService extends Component
         }
 
         foreach ($pathLookup as $key => $ids) {
-            $pathLookup[$key] = array_values(array_unique(array_map('intval', $ids)));
+            $pathLookup[$key] = array_values(
+                array_unique(array_map("intval", $ids)),
+            );
         }
 
         foreach ($filenameLookup as $key => $ids) {
-            $filenameLookup[$key] = array_values(array_unique(array_map('intval', $ids)));
+            $filenameLookup[$key] = array_values(
+                array_unique(array_map("intval", $ids)),
+            );
         }
 
         return [
-            'scannedIds' => $scannedIds,
-            'pathLookup' => $pathLookup,
-            'filenameLookup' => $filenameLookup,
+            "scannedIds" => $scannedIds,
+            "pathLookup" => $pathLookup,
+            "filenameLookup" => $filenameLookup,
         ];
     }
 
@@ -1025,7 +1214,9 @@ class ScanService extends Component
     {
         $fields = Craft::$app->getFields()->getAllFields();
 
-        return array_values(array_filter($fields, fn($field) => $this->isHtmlField($field)));
+        return array_values(
+            array_filter($fields, fn($field) => $this->isHtmlField($field)),
+        );
     }
 
     /**
@@ -1038,10 +1229,11 @@ class ScanService extends Component
             return false;
         }
 
-        return in_array(get_class($field), [
-            'craft\\redactor\\Field',
-            'craft\\ckeditor\\Field',
-        ], true);
+        return in_array(
+            get_class($field),
+            ['craft\\redactor\\Field', "craft\\ckeditor\\Field"],
+            true,
+        );
     }
 
     /**
@@ -1057,8 +1249,8 @@ class ScanService extends Component
         $relevantLayoutIds = [];
         foreach (Craft::$app->getFields()->getAllLayouts() as $layout) {
             foreach ($layout->getCustomFields() as $field) {
-                if (in_array((int)$field->id, $fieldIds, true)) {
-                    $relevantLayoutIds[] = (int)$layout->id;
+                if (in_array((int) $field->id, $fieldIds, true)) {
+                    $relevantLayoutIds[] = (int) $layout->id;
                     break;
                 }
             }
@@ -1069,12 +1261,16 @@ class ScanService extends Component
         }
 
         return array_map(
-            'intval',
+            "intval",
             (new Query())
-                ->select(['id'])
-                ->from('{{%entrytypes}}')
-                ->where(['fieldLayoutId' => array_values(array_unique($relevantLayoutIds))])
-                ->column()
+                ->select(["id"])
+                ->from("{{%entrytypes}}")
+                ->where([
+                    "fieldLayoutId" => array_values(
+                        array_unique($relevantLayoutIds),
+                    ),
+                ])
+                ->column(),
         );
     }
 
@@ -1086,11 +1282,14 @@ class ScanService extends Component
     {
         if ($fieldValue instanceof \craft\redactor\FieldData) {
             $fieldValue = $fieldValue->getRawContent();
-        } elseif (is_object($fieldValue) && method_exists($fieldValue, '__toString')) {
-            $fieldValue = (string)$fieldValue;
+        } elseif (
+            is_object($fieldValue) &&
+            method_exists($fieldValue, "__toString")
+        ) {
+            $fieldValue = (string) $fieldValue;
         }
 
-        return is_string($fieldValue) ? $fieldValue : '';
+        return is_string($fieldValue) ? $fieldValue : "";
     }
 
     /**
@@ -1111,22 +1310,28 @@ class ScanService extends Component
         string $content,
         array $scannedIds,
         array $pathLookup,
-        array $filenameLookup
+        array $filenameLookup,
     ): array {
         $found = [];
 
-        if (preg_match_all('/data-asset-id\s*=\s*["\']?(\d+)["\']?/i', $content, $matches)) {
+        if (
+            preg_match_all(
+                '/data-asset-id\s*=\s*["\']?(\d+)["\']?/i',
+                $content,
+                $matches,
+            )
+        ) {
             foreach ($matches[1] as $id) {
-                $assetId = (int)$id;
+                $assetId = (int) $id;
                 if (isset($scannedIds[$assetId])) {
                     $found[$assetId] = true;
                 }
             }
         }
 
-        if (preg_match_all('/#asset:(\d+)/i', $content, $matches)) {
+        if (preg_match_all("/#asset:(\d+)/i", $content, $matches)) {
             foreach ($matches[1] as $id) {
-                $assetId = (int)$id;
+                $assetId = (int) $id;
                 if (isset($scannedIds[$assetId])) {
                     $found[$assetId] = true;
                 }
@@ -1135,16 +1340,28 @@ class ScanService extends Component
 
         $rawReferences = [];
 
-        if (preg_match_all('/\b(?:src|href|poster)\s*=\s*["\']([^"\']+)["\']/i', $content, $matches)) {
+        if (
+            preg_match_all(
+                '/\b(?:src|href|poster)\s*=\s*["\']([^"\']+)["\']/i',
+                $content,
+                $matches,
+            )
+        ) {
             foreach ($matches[1] as $value) {
                 $rawReferences[] = $value;
             }
         }
 
-        if (preg_match_all('/\bsrcset\s*=\s*["\']([^"\']+)["\']/i', $content, $matches)) {
+        if (
+            preg_match_all(
+                '/\bsrcset\s*=\s*["\']([^"\']+)["\']/i',
+                $content,
+                $matches,
+            )
+        ) {
             foreach ($matches[1] as $srcset) {
-                foreach (preg_split('/\s*,\s*/', $srcset) ?: [] as $candidate) {
-                    $parts = preg_split('/\s+/', trim($candidate)) ?: [];
+                foreach (preg_split("/\s*,\s*/", $srcset) ?: [] as $candidate) {
+                    $parts = preg_split("/\s+/", trim($candidate)) ?: [];
                     if (!empty($parts[0])) {
                         $rawReferences[] = $parts[0];
                     }
@@ -1152,7 +1369,9 @@ class ScanService extends Component
             }
         }
 
-        if (preg_match_all('/url\((["\']?)([^)"\']+)\1\)/i', $content, $matches)) {
+        if (
+            preg_match_all('/url\((["\']?)([^)"\']+)\1\)/i', $content, $matches)
+        ) {
             foreach ($matches[2] as $value) {
                 $rawReferences[] = $value;
             }
@@ -1161,7 +1380,10 @@ class ScanService extends Component
         foreach ($rawReferences as $reference) {
             $matched = false;
 
-            foreach ($this->normalizePathCandidates((string)$reference) as $candidate) {
+            foreach (
+                $this->normalizePathCandidates((string) $reference)
+                as $candidate
+            ) {
                 $assetIds = $pathLookup[$candidate] ?? null;
                 if (is_array($assetIds) && count($assetIds) === 1) {
                     $found[$assetIds[0]] = true;
@@ -1173,23 +1395,38 @@ class ScanService extends Component
                 continue;
             }
 
-            $basename = basename((string)parse_url((string)$reference, PHP_URL_PATH));
+            $basename = basename(
+                (string) parse_url((string) $reference, PHP_URL_PATH),
+            );
             $filenameKey = mb_strtolower(trim($basename));
-            if ($filenameKey !== '' && isset($filenameLookup[$filenameKey]) && count($filenameLookup[$filenameKey]) === 1) {
+            if (
+                $filenameKey !== "" &&
+                isset($filenameLookup[$filenameKey]) &&
+                count($filenameLookup[$filenameKey]) === 1
+            ) {
                 $found[$filenameLookup[$filenameKey][0]] = true;
             }
         }
 
-        if (preg_match_all('/\b([A-Za-z0-9][A-Za-z0-9._-]*\.(?:jpe?g|png|gif|svg|pdf|webp|mp4|mp3|mov|docx?|xlsx?|pptx?|txt|zip))\b/i', $content, $matches)) {
+        if (
+            preg_match_all(
+                "/\b([A-Za-z0-9][A-Za-z0-9._-]*\.(?:jpe?g|png|gif|svg|pdf|webp|mp4|mp3|mov|docx?|xlsx?|pptx?|txt|zip))\b/i",
+                $content,
+                $matches,
+            )
+        ) {
             foreach ($matches[1] as $filename) {
                 $key = mb_strtolower($filename);
-                if (isset($filenameLookup[$key]) && count($filenameLookup[$key]) === 1) {
+                if (
+                    isset($filenameLookup[$key]) &&
+                    count($filenameLookup[$key]) === 1
+                ) {
                     $found[$filenameLookup[$key][0]] = true;
                 }
             }
         }
 
-        return array_map('intval', array_keys($found));
+        return array_map("intval", array_keys($found));
     }
 
     /**
@@ -1200,37 +1437,46 @@ class ScanService extends Component
      */
     private function normalizePathCandidates(string $path): array
     {
-        $path = html_entity_decode(trim($path), ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        if ($path === '') {
+        $path = html_entity_decode(
+            trim($path),
+            ENT_QUOTES | ENT_HTML5,
+            "UTF-8",
+        );
+        if ($path === "") {
             return [];
         }
 
         $parsedPath = parse_url($path, PHP_URL_PATH);
-        $path = is_string($parsedPath) && $parsedPath !== '' ? $parsedPath : $path;
+        $path =
+            is_string($parsedPath) && $parsedPath !== "" ? $parsedPath : $path;
         $path = rawurldecode($path);
-        $path = preg_replace('~/{2,}~', '/', $path) ?? $path;
+        $path = preg_replace("~/{2,}~", "/", $path) ?? $path;
         $path = trim($path);
 
-        if ($path === '' || $path === '.' || $path === '..') {
+        if ($path === "" || $path === "." || $path === "..") {
             return [];
         }
 
         $variants = [];
-        $trimmed = trim($path, '/');
-        if ($trimmed !== '') {
+        $trimmed = trim($path, "/");
+        if ($trimmed !== "") {
             $variants[] = $trimmed;
-            $variants[] = '/' . $trimmed;
+            $variants[] = "/" . $trimmed;
         }
 
-        if (str_starts_with($path, '/')) {
+        if (str_starts_with($path, "/")) {
             $variants[] = $path;
-            $variants[] = ltrim($path, '/');
+            $variants[] = ltrim($path, "/");
         } else {
             $variants[] = $path;
-            $variants[] = '/' . $path;
+            $variants[] = "/" . $path;
         }
 
-        return array_values(array_unique(array_filter($variants, static fn($value) => $value !== '')));
+        return array_values(
+            array_unique(
+                array_filter($variants, static fn($value) => $value !== ""),
+            ),
+        );
     }
 
     /**
@@ -1238,21 +1484,40 @@ class ScanService extends Component
      * @param array<int,bool> $usedIds
      * @param bool $includeDrafts
      * @param bool $includeRevisions
+     * @param bool $countAllRelationsAsUsage
      * @param int|null $initiatingUserId
      * @return void
      */
-    private function collectRelationChunk(array $assetIds, array &$usedIds, bool $includeDrafts, bool $includeRevisions, ?int $initiatingUserId = null): void
-    {
+    private function collectRelationChunk(
+        array $assetIds,
+        array &$usedIds,
+        bool $includeDrafts,
+        bool $includeRevisions,
+        bool $countAllRelationsAsUsage,
+        ?int $initiatingUserId = null,
+    ): void {
         if (empty($assetIds)) {
             return;
         }
 
-        $relationIds = Plugin::getInstance()
-            ->assetUsage
-            ->getResolvedRelationUsageIds($assetIds, $includeDrafts, $includeRevisions, $initiatingUserId);
+        if ($countAllRelationsAsUsage) {
+            $relationIds = (new Query())
+                ->select(["targetId"])
+                ->distinct()
+                ->from(Table::RELATIONS)
+                ->where(["targetId" => $assetIds])
+                ->column();
+        } else {
+            $relationIds = Plugin::getInstance()->assetUsage->getResolvedRelationUsageIds(
+                $assetIds,
+                $includeDrafts,
+                $includeRevisions,
+                $initiatingUserId,
+            );
+        }
 
         foreach ($relationIds as $relationId) {
-            $usedIds[(int)$relationId] = true;
+            $usedIds[(int) $relationId] = true;
         }
     }
 
@@ -1269,8 +1534,12 @@ class ScanService extends Component
      * @param int|null $initiatingUserId
      * @return array<int, Entry>
      */
-    private function loadEntriesForContentScan(array $relevantTypeIds, bool $includeDrafts, bool $includeRevisions, ?int $initiatingUserId = null): array
-    {
+    private function loadEntriesForContentScan(
+        array $relevantTypeIds,
+        bool $includeDrafts,
+        bool $includeRevisions,
+        ?int $initiatingUserId = null,
+    ): array {
         if (empty($relevantTypeIds)) {
             return [];
         }
@@ -1278,7 +1547,7 @@ class ScanService extends Component
         $entries = Entry::find()
             ->typeId($relevantTypeIds)
             ->status(null)
-            ->orderBy(['elements.id' => SORT_ASC])
+            ->orderBy(["elements.id" => SORT_ASC])
             ->all();
 
         $indexedEntries = [];
@@ -1286,16 +1555,12 @@ class ScanService extends Component
             $indexedEntries[$entry->id] = $entry;
         }
 
-        if (!$includeDrafts && !$includeRevisions) {
-            return array_values($indexedEntries);
-        }
-
         if ($includeDrafts) {
             $drafts = Entry::find()
                 ->typeId($relevantTypeIds)
                 ->drafts()
                 ->savedDraftsOnly()
-                ->orderBy(['elements.id' => SORT_ASC])
+                ->orderBy(["elements.id" => SORT_ASC])
                 ->all();
 
             foreach ($drafts as $entry) {
@@ -1307,7 +1572,7 @@ class ScanService extends Component
                     ->typeId($relevantTypeIds)
                     ->provisionalDrafts()
                     ->draftCreator($initiatingUserId)
-                    ->orderBy(['elements.id' => SORT_ASC])
+                    ->orderBy(["elements.id" => SORT_ASC])
                     ->all();
 
                 foreach ($provisionalDrafts as $entry) {
@@ -1320,7 +1585,7 @@ class ScanService extends Component
             $revisions = Entry::find()
                 ->typeId($relevantTypeIds)
                 ->revisions()
-                ->orderBy(['elements.id' => SORT_ASC])
+                ->orderBy(["elements.id" => SORT_ASC])
                 ->all();
 
             foreach ($revisions as $entry) {
@@ -1329,134 +1594,6 @@ class ScanService extends Component
         }
 
         return array_values($indexedEntries);
-    }
-
-    /**
-     * Determine whether the given entry should contribute content usage to the
-     * current scan.
-     *
-     * When draft usage is disabled, drafts and provisional drafts are skipped.
-     * When revision usage is disabled, revisions are skipped.
-     *
-     * @param Entry $entry
-     * @param bool $includeDrafts
-     * @param bool $includeRevisions
-     * @return bool
-     */
-    private function shouldScanEntryContent(Entry $entry, bool $includeDrafts, bool $includeRevisions): bool
-    {
-        return $this->resolveUsageEntryForContent($entry, $includeDrafts, $includeRevisions) !== null;
-    }
-
-    /**
-     * Resolve an entry for content-based usage checks while applying the same
-     * top-level entry resolution and draft/revision policy used by the asset
-     * usage service.
-     *
-     * @param Entry $entry
-     * @param bool $includeDrafts
-     * @param bool $includeRevisions
-     * @return Entry|null
-     */
-    private function resolveUsageEntryForContent(Entry $entry, bool $includeDrafts, bool $includeRevisions): ?Entry
-    {
-        if (!$this->shouldIncludeEntryForContent($entry, $includeDrafts, $includeRevisions)) {
-            return null;
-        }
-
-        $resolvedEntry = $this->resolveToTopLevelEntryForContent($entry);
-        if (!$resolvedEntry || $this->safeGetSectionForContent($resolvedEntry) === null) {
-            return null;
-        }
-
-        if (!$this->shouldIncludeEntryForContent($resolvedEntry, $includeDrafts, $includeRevisions)) {
-            return null;
-        }
-
-        return $resolvedEntry;
-    }
-
-    /**
-     * Determine whether a single entry state should count toward content usage.
-     *
-     * @param Entry $entry
-     * @param bool $includeDrafts
-     * @param bool $includeRevisions
-     * @return bool
-     */
-    private function shouldIncludeEntryForContent(Entry $entry, bool $includeDrafts, bool $includeRevisions): bool
-    {
-        if (!$includeRevisions && method_exists($entry, 'getIsRevision') && $entry->getIsRevision()) {
-            return false;
-        }
-
-        if (!$includeDrafts) {
-            if (method_exists($entry, 'getIsDraft') && $entry->getIsDraft()) {
-                return false;
-            }
-
-            if (method_exists($entry, 'getIsProvisionalDraft') && $entry->getIsProvisionalDraft()) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /**
-     * Safely get an entry's section for content scanning.
-     *
-     * Some draft/revision states can carry stale or invalid section IDs, which
-     * should not fail the entire scan.
-     *
-     * @param Entry $entry
-     * @return mixed
-     */
-    private function safeGetSectionForContent(Entry $entry): mixed
-    {
-        try {
-            return $entry->getSection();
-        } catch (\Throwable $e) {
-            Craft::warning('Error getting section for entry during scan content filtering: ' . $e->getMessage(), __METHOD__);
-            return null;
-        }
-    }
-
-    /**
-     * Resolve a nested entry to its top-level entry for content filtering.
-     *
-     * @param Entry $entry
-     * @return Entry|null
-     */
-    private function resolveToTopLevelEntryForContent(Entry $entry): ?Entry
-    {
-        if ($this->safeGetSectionForContent($entry) !== null) {
-            return $entry;
-        }
-
-        $current = $entry;
-        $maxDepth = 10;
-        $depth = 0;
-        $visitedIds = [$entry->id => true];
-
-        while ($current && $this->safeGetSectionForContent($current) === null && $depth < $maxDepth) {
-            try {
-                $owner = $current->getOwner();
-                if ($owner instanceof Entry && !isset($visitedIds[$owner->id])) {
-                    $visitedIds[$owner->id] = true;
-                    $current = $owner;
-                } else {
-                    break;
-                }
-            } catch (\Throwable $e) {
-                Craft::warning('Error getting owner for entry during scan content filtering: ' . $e->getMessage(), __METHOD__);
-                break;
-            }
-
-            $depth++;
-        }
-
-        return ($current && $this->safeGetSectionForContent($current) !== null) ? $current : null;
     }
 
     /**
@@ -1471,10 +1608,7 @@ class ScanService extends Component
             return [];
         }
 
-        $assets = Asset::find()
-            ->id($unusedIds)
-            ->status(null)
-            ->all();
+        $assets = Asset::find()->id($unusedIds)->status(null)->all();
 
         $rows = [];
         foreach ($assets as $asset) {
@@ -1493,59 +1627,60 @@ class ScanService extends Component
      */
     private function buildUnusedAssetRow(Asset $asset): array
     {
-        $path = '';
-        $folderPath = '';
+        $path = "";
+        $folderPath = "";
 
         try {
             $folder = $asset->getFolder();
             if ($folder && $folder->path) {
-                $folderPath = (string)$folder->path;
+                $folderPath = (string) $folder->path;
             }
         } catch (\Throwable) {
-            $folderPath = '';
+            $folderPath = "";
         }
 
         try {
             $volume = $asset->getVolume();
             if ($volume) {
-                if (method_exists($volume, 'getRootPath')) {
+                if (method_exists($volume, "getRootPath")) {
                     $volumePath = $volume->getRootPath();
                     if ($volumePath) {
-                        $path = (string)$volumePath;
+                        $path = (string) $volumePath;
                         if ($folderPath) {
-                            $path = rtrim($path, '/\\') . '/' . ltrim($folderPath, '/\\');
+                            $path =
+                                rtrim($path, "/\\") .
+                                "/" .
+                                ltrim($folderPath, "/\\");
                         }
                     }
                 }
 
-                if ($path === '' && !empty($volume->handle)) {
-                    $path = '@volumes/' . $volume->handle;
+                if ($path === "" && !empty($volume->handle)) {
+                    $path = "@volumes/" . $volume->handle;
                     if ($folderPath) {
-                        $path .= '/' . ltrim($folderPath, '/\\');
+                        $path .= "/" . ltrim($folderPath, "/\\");
                     }
                 }
             }
         } catch (\Throwable) {
-            $path = '';
+            $path = "";
         }
 
         return [
-            'id' => (int)$asset->id,
-            'title' => (string)$asset->title,
-            'filename' => (string)$asset->filename,
-            'url' => $asset->getUrl(),
-            'cpUrl' => $asset->getCpEditUrl(),
-            'volume' => $asset->volume->name ?? '',
-            'volumeId' => (int)$asset->volumeId,
-            'size' => (int)$asset->size,
-            'path' => (string)$path,
-            'kind' => (string)$asset->kind,
+            "id" => (int) $asset->id,
+            "title" => (string) $asset->title,
+            "filename" => (string) $asset->filename,
+            "url" => $asset->getUrl(),
+            "cpUrl" => $asset->getCpEditUrl(),
+            "volume" => $asset->volume->name ?? "",
+            "volumeId" => (int) $asset->volumeId,
+            "size" => (int) $asset->size,
+            "path" => (string) $path,
+            "kind" => (string) $asset->kind,
         ];
     }
 
     /**
-     * Scale progress for one stage range.
-     *
      * @param float $ratio
      * @param int $start
      * @param int $end
@@ -1555,6 +1690,6 @@ class ScanService extends Component
     {
         $ratio = max(0.0, min(1.0, $ratio));
 
-        return (int)round($start + (($end - $start) * $ratio));
+        return (int) round($start + ($end - $start) * $ratio);
     }
 }

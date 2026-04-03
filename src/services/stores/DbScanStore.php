@@ -19,10 +19,10 @@ use yii\db\Query;
  */
 class DbScanStore implements ScanStoreInterface
 {
-    private const TABLE_SCANS = '{{%assetcleaner_scans}}';
-    private const TABLE_SCAN_ASSETS = '{{%assetcleaner_scan_assets}}';
-    private const TABLE_SCAN_USED_ASSETS = '{{%assetcleaner_scan_usedassets}}';
-    private const TABLE_SCAN_RESULTS = '{{%assetcleaner_scan_results}}';
+    private const TABLE_SCANS = "{{%assetcleaner_scans}}";
+    private const TABLE_SCAN_ASSETS = "{{%assetcleaner_scan_assets}}";
+    private const TABLE_SCAN_USED_ASSETS = "{{%assetcleaner_scan_usedassets}}";
+    private const TABLE_SCAN_RESULTS = "{{%assetcleaner_scan_results}}";
 
     /**
      * @inheritdoc
@@ -34,13 +34,19 @@ class DbScanStore implements ScanStoreInterface
 
         try {
             if ($this->tableExists(self::TABLE_SCAN_RESULTS)) {
-                $db->createCommand()->delete(self::TABLE_SCAN_RESULTS)->execute();
+                $db->createCommand()
+                    ->delete(self::TABLE_SCAN_RESULTS)
+                    ->execute();
             }
             if ($this->tableExists(self::TABLE_SCAN_USED_ASSETS)) {
-                $db->createCommand()->delete(self::TABLE_SCAN_USED_ASSETS)->execute();
+                $db->createCommand()
+                    ->delete(self::TABLE_SCAN_USED_ASSETS)
+                    ->execute();
             }
             if ($this->tableExists(self::TABLE_SCAN_ASSETS)) {
-                $db->createCommand()->delete(self::TABLE_SCAN_ASSETS)->execute();
+                $db->createCommand()
+                    ->delete(self::TABLE_SCAN_ASSETS)
+                    ->execute();
             }
             if ($this->tableExists(self::TABLE_SCANS)) {
                 $db->createCommand()->delete(self::TABLE_SCANS)->execute();
@@ -49,7 +55,10 @@ class DbScanStore implements ScanStoreInterface
             $transaction->commit();
         } catch (\Throwable $e) {
             $transaction->rollBack();
-            Logger::exception('Failed clearing retained database-backed scan rows.', $e);
+            Logger::exception(
+                "Failed clearing retained database-backed scan rows.",
+                $e,
+            );
             throw $e;
         }
     }
@@ -57,37 +66,54 @@ class DbScanStore implements ScanStoreInterface
     /**
      * @inheritdoc
      */
-    public function initializeScan(string $scanId, array $volumeIds, int $assetChunkSize, int $entryBatchSize, bool $includeDrafts = false, bool $includeRevisions = false, ?int $initiatorId = null): void
-    {
+    public function initializeScan(
+        string $scanId,
+        array $volumeIds,
+        int $assetChunkSize,
+        int $entryBatchSize,
+        bool $includeDrafts = false,
+        bool $includeRevisions = false,
+        bool $countAllRelationsAsUsage = true,
+        ?int $initiatorId = null,
+    ): void {
         $now = time();
-        $normalizedVolumeIds = array_values(array_unique(array_map('intval', $volumeIds)));
-        $initiatingUserId = $initiatorId !== null ? (int)$initiatorId : null;
+        $normalizedVolumeIds = array_values(
+            array_unique(array_map("intval", $volumeIds)),
+        );
+        $initiatingUserId = $initiatorId !== null ? (int) $initiatorId : null;
 
         $payload = [
-            'scanId' => $scanId,
-            'status' => 'pending',
-            'stage' => 'setup',
-            'progress' => 0,
-            'volumeIds' => $this->encodeVolumeIdsPayload($normalizedVolumeIds, $initiatingUserId),
-            'includeDrafts' => $includeDrafts ? 1 : 0,
-            'assetChunkSize' => max(1, $assetChunkSize),
-            'entryBatchSize' => max(1, $entryBatchSize),
-            'totalAssets' => 0,
-            'processedAssets' => 0,
-            'usedCount' => 0,
-            'unusedCount' => 0,
-            'error' => null,
-            'createdAt' => $now,
-            'updatedAt' => $now,
-            'completedAt' => null,
-            'uid' => $this->generateUid(),
+            "scanId" => $scanId,
+            "status" => "pending",
+            "stage" => "setup",
+            "progress" => 0,
+            "volumeIds" => $this->encodeVolumeIdsPayload(
+                $normalizedVolumeIds,
+                $initiatingUserId,
+                $countAllRelationsAsUsage,
+            ),
+            "includeDrafts" => $includeDrafts ? 1 : 0,
+            "assetChunkSize" => max(1, $assetChunkSize),
+            "entryBatchSize" => max(1, $entryBatchSize),
+            "totalAssets" => 0,
+            "processedAssets" => 0,
+            "usedCount" => 0,
+            "unusedCount" => 0,
+            "error" => null,
+            "createdAt" => $now,
+            "updatedAt" => $now,
+            "completedAt" => null,
+            "uid" => $this->generateUid(),
         ];
 
         if ($this->hasIncludeRevisionsColumn()) {
-            $payload['includeRevisions'] = $includeRevisions ? 1 : 0;
+            $payload["includeRevisions"] = $includeRevisions ? 1 : 0;
         }
 
-        $this->db()->createCommand()->insert(self::TABLE_SCANS, $payload)->execute();
+        $this->db()
+            ->createCommand()
+            ->insert(self::TABLE_SCANS, $payload)
+            ->execute();
     }
 
     /**
@@ -101,7 +127,7 @@ class DbScanStore implements ScanStoreInterface
 
         return (new Query())
             ->from(self::TABLE_SCANS)
-            ->where(['scanId' => $scanId])
+            ->where(["scanId" => $scanId])
             ->exists($this->db());
     }
 
@@ -126,15 +152,15 @@ class DbScanStore implements ScanStoreInterface
         }
 
         return [
-            'status' => $meta['status'],
-            'stage' => $meta['stage'],
-            'progress' => $meta['progress'],
-            'totalAssets' => $meta['totalAssets'],
-            'processedAssets' => $meta['processedAssets'],
-            'usedCount' => $meta['usedCount'],
-            'unusedCount' => $meta['unusedCount'],
-            'error' => $meta['error'],
-            'updatedAt' => $meta['updatedAt'],
+            "status" => $meta["status"],
+            "stage" => $meta["stage"],
+            "progress" => $meta["progress"],
+            "totalAssets" => $meta["totalAssets"],
+            "processedAssets" => $meta["processedAssets"],
+            "usedCount" => $meta["usedCount"],
+            "unusedCount" => $meta["unusedCount"],
+            "error" => $meta["error"],
+            "updatedAt" => $meta["updatedAt"],
         ];
     }
 
@@ -164,8 +190,8 @@ class DbScanStore implements ScanStoreInterface
         }
 
         $this->mergeIntoScanRow($scanId, [
-            'status' => 'failed',
-            'error' => $message,
+            "status" => "failed",
+            "error" => $message,
         ]);
     }
 
@@ -180,15 +206,15 @@ class DbScanStore implements ScanStoreInterface
 
         $rows = (new Query())
             ->from(self::TABLE_SCAN_RESULTS)
-            ->where(['scanId' => $scanId])
-            ->orderBy(['volumeId' => SORT_ASC, 'assetId' => SORT_ASC])
+            ->where(["scanId" => $scanId])
+            ->orderBy(["volumeId" => SORT_ASC, "assetId" => SORT_ASC])
             ->all($this->db());
 
         if (empty($rows)) {
             return $this->scanExists($scanId) ? [] : null;
         }
 
-        return array_map([$this, 'normalizeResultRow'], $rows);
+        return array_map([$this, "normalizeResultRow"], $rows);
     }
 
     /**
@@ -196,10 +222,13 @@ class DbScanStore implements ScanStoreInterface
      */
     public function hasResults(string $scanId): bool
     {
-        if ($this->tableExists(self::TABLE_SCAN_RESULTS) && (new Query())
-            ->from(self::TABLE_SCAN_RESULTS)
-            ->where(['scanId' => $scanId])
-            ->exists($this->db())) {
+        if (
+            $this->tableExists(self::TABLE_SCAN_RESULTS) &&
+            (new Query())
+                ->from(self::TABLE_SCAN_RESULTS)
+                ->where(["scanId" => $scanId])
+                ->exists($this->db())
+        ) {
             return true;
         }
 
@@ -208,8 +237,8 @@ class DbScanStore implements ScanStoreInterface
             return false;
         }
 
-        return ($scan['status'] ?? null) === 'complete'
-            && !empty($scan['completedAt']);
+        return ($scan["status"] ?? null) === "complete" &&
+            !empty($scan["completedAt"]);
     }
 
     /**
@@ -219,23 +248,23 @@ class DbScanStore implements ScanStoreInterface
     {
         $row = (new Query())
             ->from(self::TABLE_SCANS)
-            ->where(['status' => 'complete'])
-            ->andWhere(['not', ['completedAt' => null]])
-            ->orderBy(['completedAt' => SORT_DESC, 'updatedAt' => SORT_DESC])
+            ->where(["status" => "complete"])
+            ->andWhere(["not", ["completedAt" => null]])
+            ->orderBy(["completedAt" => SORT_DESC, "updatedAt" => SORT_DESC])
             ->one($this->db());
 
         if (!$row) {
             return null;
         }
 
-        $scanId = (string)$row['scanId'];
+        $scanId = (string) $row["scanId"];
         if (!$this->hasResults($scanId)) {
             return null;
         }
 
         return [
-            'scanId' => $scanId,
-            'completedAt' => (int)$row['completedAt'],
+            "scanId" => $scanId,
+            "completedAt" => (int) $row["completedAt"],
         ];
     }
 
@@ -249,7 +278,7 @@ class DbScanStore implements ScanStoreInterface
         }
 
         $this->mergeIntoScanRow($scanId, [
-            'completedAt' => $completedAt ?? time(),
+            "completedAt" => $completedAt ?? time(),
         ]);
     }
 
@@ -262,37 +291,55 @@ class DbScanStore implements ScanStoreInterface
             return;
         }
 
-        $this->db()->createCommand()
-            ->delete(self::TABLE_SCAN_ASSETS, ['scanId' => $scanId])
+        $this->db()
+            ->createCommand()
+            ->delete(self::TABLE_SCAN_ASSETS, ["scanId" => $scanId])
             ->execute();
     }
 
     /**
      * @inheritdoc
      */
-    public function storeAssetSnapshotChunk(string $scanId, int $chunkIndex, array $rows): void
-    {
+    public function storeAssetSnapshotChunk(
+        string $scanId,
+        int $chunkIndex,
+        array $rows,
+    ): void {
         if (empty($rows)) {
             return;
         }
 
-        $columns = ['scanId', 'assetId', 'filename', 'volumeId', 'volumeHandle', 'folderPath', 'pathCandidates', 'uid'];
+        $columns = [
+            "scanId",
+            "assetId",
+            "filename",
+            "volumeId",
+            "volumeHandle",
+            "folderPath",
+            "pathCandidates",
+            "uid",
+        ];
         $batchRows = [];
 
         foreach ($rows as $row) {
             $batchRows[] = [
                 $scanId,
-                (int)($row['id'] ?? 0),
-                (string)($row['filename'] ?? ''),
-                isset($row['volumeId']) ? (int)$row['volumeId'] : null,
-                $row['volumeHandle'] !== null ? (string)$row['volumeHandle'] : null,
-                $row['folderPath'] !== null ? (string)$row['folderPath'] : null,
-                Json::encode(array_values($row['pathCandidates'] ?? [])),
+                (int) ($row["id"] ?? 0),
+                (string) ($row["filename"] ?? ""),
+                isset($row["volumeId"]) ? (int) $row["volumeId"] : null,
+                $row["volumeHandle"] !== null
+                    ? (string) $row["volumeHandle"]
+                    : null,
+                $row["folderPath"] !== null
+                    ? (string) $row["folderPath"]
+                    : null,
+                Json::encode(array_values($row["pathCandidates"] ?? [])),
                 $this->generateUid(),
             ];
         }
 
-        $this->db()->createCommand()
+        $this->db()
+            ->createCommand()
             ->batchInsert(self::TABLE_SCAN_ASSETS, $columns, $batchRows)
             ->execute();
     }
@@ -304,8 +351,8 @@ class DbScanStore implements ScanStoreInterface
     {
         $query = (new Query())
             ->from(self::TABLE_SCAN_ASSETS)
-            ->where(['scanId' => $scanId])
-            ->orderBy(['assetId' => SORT_ASC]);
+            ->where(["scanId" => $scanId])
+            ->orderBy(["assetId" => SORT_ASC]);
 
         foreach ($query->batch(500, $this->db()) as $batch) {
             foreach ($batch as $row) {
@@ -317,20 +364,25 @@ class DbScanStore implements ScanStoreInterface
     /**
      * @inheritdoc
      */
-    public function replaceUsedIds(string $scanId, string $source, array $assetIds): void
-    {
+    public function replaceUsedIds(
+        string $scanId,
+        string $source,
+        array $assetIds,
+    ): void {
         $db = $this->db();
         $transaction = $db->beginTransaction();
 
         try {
             $db->createCommand()
                 ->delete(self::TABLE_SCAN_USED_ASSETS, [
-                    'scanId' => $scanId,
-                    'source' => $source,
+                    "scanId" => $scanId,
+                    "source" => $source,
                 ])
                 ->execute();
 
-            $assetIds = array_values(array_unique(array_filter(array_map('intval', $assetIds))));
+            $assetIds = array_values(
+                array_unique(array_filter(array_map("intval", $assetIds))),
+            );
             if (!empty($assetIds)) {
                 $rows = [];
                 foreach ($assetIds as $assetId) {
@@ -345,8 +397,8 @@ class DbScanStore implements ScanStoreInterface
                 $db->createCommand()
                     ->batchInsert(
                         self::TABLE_SCAN_USED_ASSETS,
-                        ['scanId', 'assetId', 'source', 'uid'],
-                        $rows
+                        ["scanId", "assetId", "source", "uid"],
+                        $rows,
                     )
                     ->execute();
             }
@@ -354,10 +406,14 @@ class DbScanStore implements ScanStoreInterface
             $transaction->commit();
         } catch (\Throwable $e) {
             $transaction->rollBack();
-            Logger::exception('Failed replacing used asset IDs in database-backed scan storage.', $e, [
-                'scanId' => $scanId,
-                'source' => $source,
-            ]);
+            Logger::exception(
+                "Failed replacing used asset IDs in database-backed scan storage.",
+                $e,
+                [
+                    "scanId" => $scanId,
+                    "source" => $source,
+                ],
+            );
             throw $e;
         }
     }
@@ -372,13 +428,13 @@ class DbScanStore implements ScanStoreInterface
         }
 
         $ids = (new Query())
-            ->select(['assetId'])
+            ->select(["assetId"])
             ->distinct()
             ->from(self::TABLE_SCAN_USED_ASSETS)
-            ->where(['scanId' => $scanId])
+            ->where(["scanId" => $scanId])
             ->column($this->db());
 
-        $ids = array_map('intval', $ids);
+        $ids = array_map("intval", $ids);
         sort($ids, SORT_NUMERIC);
 
         return $ids;
@@ -393,8 +449,9 @@ class DbScanStore implements ScanStoreInterface
             return;
         }
 
-        $this->db()->createCommand()
-            ->delete(self::TABLE_SCAN_RESULTS, ['scanId' => $scanId])
+        $this->db()
+            ->createCommand()
+            ->delete(self::TABLE_SCAN_RESULTS, ["scanId" => $scanId])
             ->execute();
     }
 
@@ -408,39 +465,40 @@ class DbScanStore implements ScanStoreInterface
         }
 
         $columns = [
-            'scanId',
-            'assetId',
-            'title',
-            'filename',
-            'url',
-            'cpUrl',
-            'volume',
-            'volumeId',
-            'size',
-            'path',
-            'kind',
-            'uid',
+            "scanId",
+            "assetId",
+            "title",
+            "filename",
+            "url",
+            "cpUrl",
+            "volume",
+            "volumeId",
+            "size",
+            "path",
+            "kind",
+            "uid",
         ];
 
         $batchRows = [];
         foreach ($rows as $row) {
             $batchRows[] = [
                 $scanId,
-                (int)($row['id'] ?? $row['assetId'] ?? 0),
-                (string)($row['title'] ?? ''),
-                (string)($row['filename'] ?? ''),
-                isset($row['url']) ? (string)$row['url'] : null,
-                isset($row['cpUrl']) ? (string)$row['cpUrl'] : null,
-                isset($row['volume']) ? (string)$row['volume'] : null,
-                isset($row['volumeId']) ? (int)$row['volumeId'] : null,
-                isset($row['size']) ? (int)$row['size'] : 0,
-                isset($row['path']) ? (string)$row['path'] : null,
-                isset($row['kind']) ? (string)$row['kind'] : null,
+                (int) ($row["id"] ?? ($row["assetId"] ?? 0)),
+                (string) ($row["title"] ?? ""),
+                (string) ($row["filename"] ?? ""),
+                isset($row["url"]) ? (string) $row["url"] : null,
+                isset($row["cpUrl"]) ? (string) $row["cpUrl"] : null,
+                isset($row["volume"]) ? (string) $row["volume"] : null,
+                isset($row["volumeId"]) ? (int) $row["volumeId"] : null,
+                isset($row["size"]) ? (int) $row["size"] : 0,
+                isset($row["path"]) ? (string) $row["path"] : null,
+                isset($row["kind"]) ? (string) $row["kind"] : null,
                 $this->generateUid(),
             ];
         }
 
-        $this->db()->createCommand()
+        $this->db()
+            ->createCommand()
             ->batchInsert(self::TABLE_SCAN_RESULTS, $columns, $batchRows)
             ->execute();
     }
@@ -469,7 +527,7 @@ class DbScanStore implements ScanStoreInterface
     {
         $schema = $this->db()->getTableSchema(self::TABLE_SCANS, true);
 
-        return $schema !== null && isset($schema->columns['includeRevisions']);
+        return $schema !== null && isset($schema->columns["includeRevisions"]);
     }
 
     /**
@@ -484,7 +542,7 @@ class DbScanStore implements ScanStoreInterface
 
         $row = (new Query())
             ->from(self::TABLE_SCANS)
-            ->where(['scanId' => $scanId])
+            ->where(["scanId" => $scanId])
             ->one($this->db());
 
         return is_array($row) ? $row : null;
@@ -506,12 +564,13 @@ class DbScanStore implements ScanStoreInterface
         $merged = array_merge($current, $updates);
         $payload = $this->serializeScanPayload($merged);
 
-        if (!isset($payload['updatedAt'])) {
-            $payload['updatedAt'] = time();
+        if (!isset($payload["updatedAt"])) {
+            $payload["updatedAt"] = time();
         }
 
-        $this->db()->createCommand()
-            ->update(self::TABLE_SCANS, $payload, ['scanId' => $scanId])
+        $this->db()
+            ->createCommand()
+            ->update(self::TABLE_SCANS, $payload, ["scanId" => $scanId])
             ->execute();
     }
 
@@ -521,32 +580,45 @@ class DbScanStore implements ScanStoreInterface
      */
     private function normalizeScanRow(array $row): array
     {
-        $assetChunkSize = max(1, (int)($row['assetChunkSize'] ?? 100));
-        $totalAssets = (int)($row['totalAssets'] ?? 0);
-        $volumeIdsPayload = $this->decodeVolumeIdsPayload($row['volumeIds'] ?? null);
+        $assetChunkSize = max(1, (int) ($row["assetChunkSize"] ?? 100));
+        $totalAssets = (int) ($row["totalAssets"] ?? 0);
+        $volumeIdsPayload = $this->decodeVolumeIdsPayload(
+            $row["volumeIds"] ?? null,
+        );
 
         return [
-            'scanId' => (string)$row['scanId'],
-            'createdAt' => (int)($row['createdAt'] ?? 0),
-            'updatedAt' => (int)($row['updatedAt'] ?? 0),
-            'completedAt' => isset($row['completedAt']) ? (int)$row['completedAt'] : null,
-            'volumeIds' => $volumeIdsPayload['ids'],
-            'initiatingUserId' => $volumeIdsPayload['initiatingUserId'],
-            'includeDrafts' => !empty($row['includeDrafts']),
-            'includeRevisions' => array_key_exists('includeRevisions', $row)
-                ? !empty($row['includeRevisions'])
-                : !empty($volumeIdsPayload['includeRevisions']),
-            'assetChunkSize' => $assetChunkSize,
-            'entryBatchSize' => max(1, (int)($row['entryBatchSize'] ?? 200)),
-            'status' => (string)($row['status'] ?? 'pending'),
-            'stage' => (string)($row['stage'] ?? 'setup'),
-            'progress' => (int)($row['progress'] ?? 0),
-            'totalAssets' => $totalAssets,
-            'totalChunks' => $totalAssets > 0 ? (int)ceil($totalAssets / $assetChunkSize) : 0,
-            'processedAssets' => (int)($row['processedAssets'] ?? 0),
-            'usedCount' => (int)($row['usedCount'] ?? 0),
-            'unusedCount' => (int)($row['unusedCount'] ?? 0),
-            'error' => $row['error'] !== null ? (string)$row['error'] : null,
+            "scanId" => (string) $row["scanId"],
+            "createdAt" => (int) ($row["createdAt"] ?? 0),
+            "updatedAt" => (int) ($row["updatedAt"] ?? 0),
+            "completedAt" => isset($row["completedAt"])
+                ? (int) $row["completedAt"]
+                : null,
+            "volumeIds" => $volumeIdsPayload["ids"],
+            "initiatingUserId" => $volumeIdsPayload["initiatingUserId"],
+            "countAllRelationsAsUsage" => array_key_exists(
+                "countAllRelationsAsUsage",
+                $volumeIdsPayload,
+            )
+                ? (bool) $volumeIdsPayload["countAllRelationsAsUsage"]
+                : true,
+            "includeDrafts" => !empty($row["includeDrafts"]),
+            "includeRevisions" => array_key_exists("includeRevisions", $row)
+                ? !empty($row["includeRevisions"])
+                : !empty($volumeIdsPayload["includeRevisions"]),
+            "assetChunkSize" => $assetChunkSize,
+            "entryBatchSize" => max(1, (int) ($row["entryBatchSize"] ?? 200)),
+            "status" => (string) ($row["status"] ?? "pending"),
+            "stage" => (string) ($row["stage"] ?? "setup"),
+            "progress" => (int) ($row["progress"] ?? 0),
+            "totalAssets" => $totalAssets,
+            "totalChunks" =>
+                $totalAssets > 0
+                    ? (int) ceil($totalAssets / $assetChunkSize)
+                    : 0,
+            "processedAssets" => (int) ($row["processedAssets"] ?? 0),
+            "usedCount" => (int) ($row["usedCount"] ?? 0),
+            "unusedCount" => (int) ($row["unusedCount"] ?? 0),
+            "error" => $row["error"] !== null ? (string) $row["error"] : null,
         ];
     }
 
@@ -557,27 +629,38 @@ class DbScanStore implements ScanStoreInterface
     private function serializeScanPayload(array $meta): array
     {
         $payload = [
-            'status' => (string)($meta['status'] ?? 'pending'),
-            'stage' => (string)($meta['stage'] ?? 'setup'),
-            'progress' => (int)($meta['progress'] ?? 0),
-            'volumeIds' => $this->encodeVolumeIdsPayload(
-                array_values(array_unique(array_map('intval', $meta['volumeIds'] ?? []))),
-                isset($meta['initiatingUserId']) ? (int)$meta['initiatingUserId'] : null
+            "status" => (string) ($meta["status"] ?? "pending"),
+            "stage" => (string) ($meta["stage"] ?? "setup"),
+            "progress" => (int) ($meta["progress"] ?? 0),
+            "volumeIds" => $this->encodeVolumeIdsPayload(
+                array_values(
+                    array_unique(array_map("intval", $meta["volumeIds"] ?? [])),
+                ),
+                isset($meta["initiatingUserId"])
+                    ? (int) $meta["initiatingUserId"]
+                    : null,
+                array_key_exists("countAllRelationsAsUsage", $meta)
+                    ? (bool) $meta["countAllRelationsAsUsage"]
+                    : true,
             ),
-            'includeDrafts' => !empty($meta['includeDrafts']) ? 1 : 0,
-            'assetChunkSize' => max(1, (int)($meta['assetChunkSize'] ?? 100)),
-            'entryBatchSize' => max(1, (int)($meta['entryBatchSize'] ?? 200)),
-            'totalAssets' => (int)($meta['totalAssets'] ?? 0),
-            'processedAssets' => (int)($meta['processedAssets'] ?? 0),
-            'usedCount' => (int)($meta['usedCount'] ?? 0),
-            'unusedCount' => (int)($meta['unusedCount'] ?? 0),
-            'error' => isset($meta['error']) ? (string)$meta['error'] : null,
-            'updatedAt' => (int)($meta['updatedAt'] ?? time()),
-            'completedAt' => isset($meta['completedAt']) ? (int)$meta['completedAt'] : null,
+            "includeDrafts" => !empty($meta["includeDrafts"]) ? 1 : 0,
+            "assetChunkSize" => max(1, (int) ($meta["assetChunkSize"] ?? 100)),
+            "entryBatchSize" => max(1, (int) ($meta["entryBatchSize"] ?? 200)),
+            "totalAssets" => (int) ($meta["totalAssets"] ?? 0),
+            "processedAssets" => (int) ($meta["processedAssets"] ?? 0),
+            "usedCount" => (int) ($meta["usedCount"] ?? 0),
+            "unusedCount" => (int) ($meta["unusedCount"] ?? 0),
+            "error" => isset($meta["error"]) ? (string) $meta["error"] : null,
+            "updatedAt" => (int) ($meta["updatedAt"] ?? time()),
+            "completedAt" => isset($meta["completedAt"])
+                ? (int) $meta["completedAt"]
+                : null,
         ];
 
         if ($this->hasIncludeRevisionsColumn()) {
-            $payload['includeRevisions'] = !empty($meta['includeRevisions']) ? 1 : 0;
+            $payload["includeRevisions"] = !empty($meta["includeRevisions"])
+                ? 1
+                : 0;
         }
 
         return $payload;
@@ -590,12 +673,20 @@ class DbScanStore implements ScanStoreInterface
     private function normalizeAssetSnapshotRow(array $row): array
     {
         return [
-            'id' => (int)$row['assetId'],
-            'filename' => (string)$row['filename'],
-            'volumeId' => isset($row['volumeId']) ? (int)$row['volumeId'] : null,
-            'volumeHandle' => $row['volumeHandle'] !== null ? (string)$row['volumeHandle'] : null,
-            'folderPath' => $row['folderPath'] !== null ? (string)$row['folderPath'] : '',
-            'pathCandidates' => $this->decodeStringArray($row['pathCandidates'] ?? null),
+            "id" => (int) $row["assetId"],
+            "filename" => (string) $row["filename"],
+            "volumeId" => isset($row["volumeId"])
+                ? (int) $row["volumeId"]
+                : null,
+            "volumeHandle" =>
+                $row["volumeHandle"] !== null
+                    ? (string) $row["volumeHandle"]
+                    : null,
+            "folderPath" =>
+                $row["folderPath"] !== null ? (string) $row["folderPath"] : "",
+            "pathCandidates" => $this->decodeStringArray(
+                $row["pathCandidates"] ?? null,
+            ),
         ];
     }
 
@@ -606,16 +697,18 @@ class DbScanStore implements ScanStoreInterface
     private function normalizeResultRow(array $row): array
     {
         return [
-            'id' => (int)$row['assetId'],
-            'title' => (string)$row['title'],
-            'filename' => (string)$row['filename'],
-            'url' => $row['url'] !== null ? (string)$row['url'] : null,
-            'cpUrl' => $row['cpUrl'] !== null ? (string)$row['cpUrl'] : null,
-            'volume' => $row['volume'] !== null ? (string)$row['volume'] : '',
-            'volumeId' => isset($row['volumeId']) ? (int)$row['volumeId'] : null,
-            'size' => (int)($row['size'] ?? 0),
-            'path' => $row['path'] !== null ? (string)$row['path'] : '',
-            'kind' => $row['kind'] !== null ? (string)$row['kind'] : '',
+            "id" => (int) $row["assetId"],
+            "title" => (string) $row["title"],
+            "filename" => (string) $row["filename"],
+            "url" => $row["url"] !== null ? (string) $row["url"] : null,
+            "cpUrl" => $row["cpUrl"] !== null ? (string) $row["cpUrl"] : null,
+            "volume" => $row["volume"] !== null ? (string) $row["volume"] : "",
+            "volumeId" => isset($row["volumeId"])
+                ? (int) $row["volumeId"]
+                : null,
+            "size" => (int) ($row["size"] ?? 0),
+            "path" => $row["path"] !== null ? (string) $row["path"] : "",
+            "kind" => $row["kind"] !== null ? (string) $row["kind"] : "",
         ];
     }
 
@@ -627,13 +720,20 @@ class DbScanStore implements ScanStoreInterface
      *
      * @param array<int> $volumeIds
      * @param int|null $initiatingUserId
+     * @param bool $countAllRelationsAsUsage
      * @return string
      */
-    private function encodeVolumeIdsPayload(array $volumeIds, ?int $initiatingUserId): string
-    {
+    private function encodeVolumeIdsPayload(
+        array $volumeIds,
+        ?int $initiatingUserId,
+        bool $countAllRelationsAsUsage = true,
+    ): string {
         return Json::encode([
-            'ids' => array_values(array_unique(array_map('intval', $volumeIds))),
-            'initiatingUserId' => $initiatingUserId,
+            "ids" => array_values(
+                array_unique(array_map("intval", $volumeIds)),
+            ),
+            "initiatingUserId" => $initiatingUserId,
+            "countAllRelationsAsUsage" => $countAllRelationsAsUsage,
         ]);
     }
 
@@ -643,24 +743,35 @@ class DbScanStore implements ScanStoreInterface
      * Supports both the new object payload and the legacy plain array payload.
      *
      * @param mixed $value
-     * @return array{ids: array<int>, initiatingUserId: int|null, includeRevisions: bool}
+     * @return array{ids: array<int>, initiatingUserId: int|null, includeRevisions: bool, countAllRelationsAsUsage: bool}
      */
     private function decodeVolumeIdsPayload(mixed $value): array
     {
         $decoded = $this->decodeJsonArray($value);
 
-        if (array_key_exists('ids', $decoded)) {
+        if (array_key_exists("ids", $decoded)) {
             return [
-                'ids' => array_values(array_map('intval', (array)$decoded['ids'])),
-                'initiatingUserId' => isset($decoded['initiatingUserId']) ? (int)$decoded['initiatingUserId'] : null,
-                'includeRevisions' => !empty($decoded['includeRevisions']),
+                "ids" => array_values(
+                    array_map("intval", (array) $decoded["ids"]),
+                ),
+                "initiatingUserId" => isset($decoded["initiatingUserId"])
+                    ? (int) $decoded["initiatingUserId"]
+                    : null,
+                "includeRevisions" => !empty($decoded["includeRevisions"]),
+                "countAllRelationsAsUsage" => array_key_exists(
+                    "countAllRelationsAsUsage",
+                    $decoded,
+                )
+                    ? (bool) $decoded["countAllRelationsAsUsage"]
+                    : true,
             ];
         }
 
         return [
-            'ids' => array_values(array_map('intval', $decoded)),
-            'initiatingUserId' => null,
-            'includeRevisions' => false,
+            "ids" => array_values(array_map("intval", $decoded)),
+            "initiatingUserId" => null,
+            "includeRevisions" => false,
+            "countAllRelationsAsUsage" => true,
         ];
     }
 
@@ -672,10 +783,8 @@ class DbScanStore implements ScanStoreInterface
     {
         $decoded = $this->decodeJsonArray($value);
 
-        return array_values(array_map('intval', $decoded));
+        return array_values(array_map("intval", $decoded));
     }
-
-
 
     /**
      * @param mixed $value
@@ -685,7 +794,7 @@ class DbScanStore implements ScanStoreInterface
     {
         $decoded = $this->decodeJsonArray($value);
 
-        return array_values(array_map('strval', $decoded));
+        return array_values(array_map("strval", $decoded));
     }
 
     /**
@@ -694,7 +803,7 @@ class DbScanStore implements ScanStoreInterface
      */
     private function decodeJsonArray(mixed $value): array
     {
-        if (!is_string($value) || trim($value) === '') {
+        if (!is_string($value) || trim($value) === "") {
             return [];
         }
 
@@ -703,9 +812,12 @@ class DbScanStore implements ScanStoreInterface
 
             return is_array($decoded) ? $decoded : [];
         } catch (\Throwable $e) {
-            Logger::warning('Failed decoding JSON payload from database-backed scan storage.', [
-                'error' => $e->getMessage(),
-            ]);
+            Logger::warning(
+                "Failed decoding JSON payload from database-backed scan storage.",
+                [
+                    "error" => $e->getMessage(),
+                ],
+            );
 
             return [];
         }

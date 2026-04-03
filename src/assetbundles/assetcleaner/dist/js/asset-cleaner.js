@@ -343,6 +343,13 @@
         const includeRevisions = !!(
             includeRevisionsInput && includeRevisionsInput.checked
         );
+        const countAllRelationsAsUsageInput = container.querySelector(
+            'input[type="checkbox"][name="countAllRelationsAsUsage"]',
+        );
+        const countAllRelationsAsUsage = !!(
+            countAllRelationsAsUsageInput &&
+            countAllRelationsAsUsageInput.checked
+        );
 
         // Get selected volumes
         const volumeIds = [];
@@ -382,6 +389,7 @@
                     volumeIds: volumeIds,
                     includeDrafts: includeDrafts,
                     includeRevisions: includeRevisions,
+                    countAllRelationsAsUsage: countAllRelationsAsUsage,
                 },
             },
         )

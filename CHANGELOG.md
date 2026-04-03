@@ -13,12 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added plugin settings for selecting the scan storage mode and configuring the file-based scan workspace path
 - Added default settings for whether draft-only and revision-only asset references should count as used
 - Added per-scan utility toggles for including drafts and revisions without changing the global defaults
+- Added a per-scan relational fallback option that treats any row in Craft’s relations table as usage, helping preserve assets referenced by plugin-defined or otherwise unknown element types
 
 ### Changed
 - Refactored scan persistence into storage backends so the scan coordinator can run against either file-based or database-based storage
 - Hardened scan workspace file writes with stricter validation, readability checks, and better failure handling
 - Retained only the latest scan for restore/export workflows while allowing stale queued jobs to exit quietly if their scan has been replaced
 - Made draft and revision handling explicit in scan behavior so installations can choose between canonical/live-oriented cleanup and editorial-history-aware cleanup
+- Defaulted scans to the safer relational fallback mode while still allowing stricter relation resolution when needed
 
 ### Fixed
 - Added path-aware diagnostics when scan metadata files are missing or unreadable, including resolved storage context details to help debug container and shared-storage setups

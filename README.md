@@ -11,6 +11,7 @@ Identify and clean up unused assets in Craft CMS 5.
 - **File-Backed Scan State** - Long-running scans can store progress and intermediate data under `@storage/asset-cleaner/scans/<scanId>` or a shared custom workspace path
 - **Database-Backed Scan State** - Containerized and cloud-style installs can store scan state in the database when shared filesystem access is not guaranteed
 - **Configurable Draft & Revision Handling** - Control whether draft-only and revision-only usage should count during scans
+- **Relational Fallback Option** - Optionally treat any row in Craft’s relations table as usage for safer scans in projects with plugin-defined or unknown element types
 - **Large Library Friendly** - Asset snapshots are chunked and content is processed in batches for much better performance on large datasets
 - **Per-Volume Results** - Results grouped by volume with individual file counts and total sizes
 - **Export Options** - Download CSV or ZIP of unused assets with smart filenames
@@ -65,18 +66,19 @@ php craft plugin/install asset-cleaner
 1. Navigate to **Utilities → Asset Cleaner**
 2. Select the volumes you want to scan
 3. Choose whether to **Include drafts in this scan** and/or **Include revisions in this scan**
-4. Click **Scan Now**
-5. Wait for the background scan to complete
-6. Review the results grouped by volume, showing:
+4. Choose whether to **Count all relational references as usage**
+5. Click **Scan Now**
+6. Wait for the background scan to complete
+7. Review the results grouped by volume, showing:
    - Number of unused assets per volume
    - Total file size per volume
-7. Use bulk actions (global or per-volume):
+8. Use bulk actions (global or per-volume):
    - **Download CSV** - Export a list of unused assets
    - **Download ZIP** - Download unused assets, optionally preserving folder structure
    - **Put into Trash** - Soft delete assets
    - **Delete Permanently** - Permanently remove assets with confirmation
 
-The draft and revision toggles on the utility page override the plugin's default draft/revision handling settings for that individual scan.
+The draft and revision toggles on the utility page override the plugin's default draft/revision handling settings for that individual scan. The relational fallback checkbox is scan-specific and is enabled by default for safer cleanup scans.
 
 ### Scan stages
 
@@ -233,6 +235,14 @@ return [
 ```
 
 By default, draft-only and revision-only usage are excluded unless you enable them.
+
+### Relational fallback
+
+Scans also provide a **Count all relational references as usage** checkbox.
+
+When this option is enabled, any asset with a row in Craft’s `relations` table is treated as used. This is the safest mode for projects that rely on plugin-defined or unknown element types that may store asset relations outside normal entry content.
+
+When this option is disabled, Asset Cleaner uses stricter relation resolution rules to identify more potentially unused assets, but that can undercount legitimate backend-only usage from third-party element types.
 
 ### Memory-efficient ZIP creation
 
