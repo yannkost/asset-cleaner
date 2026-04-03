@@ -47,23 +47,62 @@ class UsageController extends Controller
 
         try {
             $request = Craft::$app->getRequest();
-            $assetId = $request->getRequiredParam('assetId');
+            $assetId = $request->getRequiredParam("assetId");
+            $includeDraftsParam = $request->getParam("includeDrafts", null);
+            $includeRevisionsParam = $request->getParam(
+                "includeRevisions",
+                null,
+            );
+            $countAllRelationsParam = $request->getParam(
+                "countAllRelationsAsUsage",
+                null,
+            );
+            $initiatingUserId = (int) (Craft::$app->getUser()->getId() ?? 0);
+
+            $includeDrafts =
+                $includeDraftsParam === null
+                    ? null
+                    : filter_var($includeDraftsParam, FILTER_VALIDATE_BOOLEAN);
+            $includeRevisions =
+                $includeRevisionsParam === null
+                    ? null
+                    : filter_var(
+                        $includeRevisionsParam,
+                        FILTER_VALIDATE_BOOLEAN,
+                    );
+            $countAllRelationsAsUsage =
+                $countAllRelationsParam === null
+                    ? true
+                    : filter_var(
+                        $countAllRelationsParam,
+                        FILTER_VALIDATE_BOOLEAN,
+                    );
 
             $service = Plugin::getInstance()->assetUsage;
-            $usage = $service->getAssetUsage((int)$assetId);
+            $usage = $service->getAssetUsage(
+                (int) $assetId,
+                $includeDrafts,
+                $includeRevisions,
+                $initiatingUserId,
+                $countAllRelationsAsUsage,
+            );
 
-            $isUsed = !empty($usage['relations']) || !empty($usage['content']);
+            $usage["otherRelations"] = $usage["otherRelations"] ?? [];
+            $isUsed = !empty($usage["relations"]) || !empty($usage["otherRelations"]) || !empty($usage["content"]);
 
             return $this->asJson([
-                'success' => true,
-                'isUsed' => $isUsed,
-                'usage' => $usage,
+                "success" => true,
+                "isUsed" => $isUsed,
+                "usage" => $usage,
             ]);
         } catch (\Throwable $e) {
-            Logger::exception('Failed to get asset usage', $e);
+            Logger::exception("Failed to get asset usage", $e);
             return $this->asJson([
-                'success' => false,
-                'error' => Craft::t('asset-cleaner', 'Failed to get asset usage.'),
+                "success" => false,
+                "error" => Craft::t(
+                    "asset-cleaner",
+                    "Failed to get asset usage.",
+                ),
             ]);
         }
     }

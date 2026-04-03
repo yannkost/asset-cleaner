@@ -11,99 +11,134 @@ use craft\db\Table;
 use craft\elements\Asset;
 use craft\elements\Entry;
 use craft\elements\GlobalSet;
-use craft\helpers\FileHelper;
-use craft\helpers\Json;
-use yii\base\Exception;
+use yann\assetcleaner\helpers\Logger;
+use yann\assetcleaner\models\Settings;
+use yann\assetcleaner\Plugin;
+use yann\assetcleaner\services\stores\DbScanStore;
+use yann\assetcleaner\services\stores\FileScanStore;
+use yann\assetcleaner\services\stores\ScanStoreInterface;
 
 /**
- * File-backed scan orchestration and staged scan helpers.
+ * Storage-agnostic scan coordinator.
  *
- * This service stores scan state under @storage/asset-cleaner/scans/<scanId>
- * and provides the domain logic for:
- * - creating scan workspaces
- * - snapshotting assets into chunk files
- * - collecting used asset IDs from relations and content
- * - finalizing scan results into file-backed outputs
+ * This service owns the scan pipeline orchestration while delegating
+ * persistence to the configured scan store backend.
  */
 class ScanService extends Component
 {
-    public const STATUS_PENDING = 'pending';
-    public const STATUS_RUNNING = 'running';
-    public const STATUS_COMPLETE = 'complete';
-    public const STATUS_FAILED = 'failed';
+    public const STATUS_PENDING = "pending";
+    public const STATUS_RUNNING = "running";
+    public const STATUS_COMPLETE = "complete";
+    public const STATUS_FAILED = "failed";
 
-    public const STAGE_SETUP = 'setup';
-    public const STAGE_RELATIONS = 'relations';
-    public const STAGE_CONTENT = 'content';
-    public const STAGE_FINALIZE = 'finalize';
+    public const STAGE_SETUP = "setup";
+    public const STAGE_RELATIONS = "relations";
+    public const STAGE_CONTENT = "content";
+    public const STAGE_FINALIZE = "finalize";
 
     private const DEFAULT_ASSET_CHUNK_SIZE = 100;
     private const DEFAULT_ENTRY_BATCH_SIZE = 200;
     private const DEFAULT_RESULT_QUERY_CHUNK_SIZE = 250;
-    private const LAST_SCAN_FILE = 'last-scan.json';
 
     /**
-     * Create the scan workspace and write initial metadata/progress files.
+     * @var array<string, ScanStoreInterface>
+     */
+    private array $stores = [];
+
+    /**
+     * Create a new scan and clear any previously retained scan from the active
+     * storage backend.
      *
      * @param string $scanId
      * @param array $volumeIds
      * @param int $assetChunkSize
+     * @param bool $includeDrafts
+     * @param bool $includeRevisions
+     * @param bool $countAllRelationsAsUsage
+     * @param int|null $initiatorId
      * @return void
-     * @throws Exception
      */
-    public function initializeScan(string $scanId, array $volumeIds = [], int $assetChunkSize = self::DEFAULT_ASSET_CHUNK_SIZE): void
-    {
+    public function initializeScan(
+        string $scanId,
+        array $volumeIds = [],
+        int $assetChunkSize = self::DEFAULT_ASSET_CHUNK_SIZE,
+        bool $includeDrafts = false,
+        bool $includeRevisions = false,
+        bool $countAllRelationsAsUsage = true,
+        ?int $initiatorId = null,
+    ): void {
         $scanId = trim($scanId);
-        if ($scanId === '') {
-            throw new Exception('Missing scan ID.');
+        if ($scanId === "") {
+            throw new \InvalidArgumentException("Missing scan ID.");
         }
 
-        $volumeIds = array_values(array_unique(array_map('intval', $volumeIds)));
-        $assetChunkSize = max(1, $assetChunkSize);
+        $store = $this->getStore();
+        $store->clearRetainedScans();
+        $store->initializeScan(
+            $scanId,
+            $volumeIds,
+            max(1, $assetChunkSize),
+            self::DEFAULT_ENTRY_BATCH_SIZE,
+            $includeDrafts,
+            $includeRevisions,
+            $countAllRelationsAsUsage,
+            $initiatorId,
+        );
+    }
 
-        $this->ensureBaseDirectories();
+    /**
+     * Whether the scan still exists in the active backend.
+     *
+     * Old queued jobs may outlive the retained scan and should exit quietly.
+     *
+     * @param string $scanId
+     * @return bool
+     */
+    public function scanExists(string $scanId): bool
+    {
+        return $this->getStore()->scanExists($scanId);
+    }
 
-        FileHelper::createDirectory($this->getScanPath($scanId));
-        FileHelper::createDirectory($this->getAssetsDirectory($scanId));
-        FileHelper::createDirectory($this->getUsedDirectory($scanId));
-        FileHelper::createDirectory($this->getResultsDirectory($scanId));
+    /**
+     * Resolve the default draft-inclusion policy for new scans.
+     *
+     * Config overrides the plugin setting.
+     *
+     * @return bool
+     */
+    public function getDefaultIncludeDrafts(): bool
+    {
+        $configuredValue = $this->getConfiguredIncludeDrafts();
+        if ($configuredValue !== null) {
+            return $configuredValue;
+        }
 
-        $now = time();
+        $settings = Plugin::getInstance()->getSettings();
 
-        $this->writeJsonFile($this->getMetaPath($scanId), [
-            'scanId' => $scanId,
-            'createdAt' => $now,
-            'updatedAt' => $now,
-            'completedAt' => null,
-            'volumeIds' => $volumeIds,
-            'assetChunkSize' => $assetChunkSize,
-            'entryBatchSize' => self::DEFAULT_ENTRY_BATCH_SIZE,
-            'status' => self::STATUS_PENDING,
-            'stage' => self::STAGE_SETUP,
-            'totalAssets' => 0,
-            'totalChunks' => 0,
-        ]);
+        return $settings instanceof Settings
+            ? $settings->shouldIncludeDraftsByDefault()
+            : false;
+    }
 
-        $this->writeJsonFile($this->getProgressPath($scanId), [
-            'status' => self::STATUS_PENDING,
-            'stage' => self::STAGE_SETUP,
-            'progress' => 0,
-            'totalAssets' => 0,
-            'processedAssets' => 0,
-            'usedCount' => 0,
-            'unusedCount' => 0,
-            'error' => null,
-            'updatedAt' => $now,
-        ]);
+    /**
+     * Resolve the default revision-inclusion policy for new scans.
+     *
+     * Config overrides the plugin setting.
+     *
+     * @return bool
+     */
+    public function getDefaultIncludeRevisions(): bool
+    {
+        $configuredValue = $this->getConfiguredIncludeRevisions();
+        if ($configuredValue !== null) {
+            return $configuredValue;
+        }
 
-        $this->writeJsonFile($this->getStatePath($scanId), [
-            'assetsSnapshotted' => false,
-            'relationsProcessed' => false,
-            'contentProcessed' => false,
-            'finalized' => false,
-            'usedRelationCount' => 0,
-            'usedContentCount' => 0,
-        ]);
+        $settings = Plugin::getInstance()->getSettings();
+
+        return $settings instanceof Settings
+            ? $settings->shouldIncludeRevisionsByDefault()
+            : false;
     }
 
     /**
@@ -114,12 +149,7 @@ class ScanService extends Component
      */
     public function getProgress(string $scanId): ?array
     {
-        $progress = $this->readJsonFile($this->getProgressPath($scanId));
-        if (!is_array($progress)) {
-            return null;
-        }
-
-        return $progress;
+        return $this->getStore()->getProgress($scanId);
     }
 
     /**
@@ -130,8 +160,7 @@ class ScanService extends Component
      */
     public function getMeta(string $scanId): ?array
     {
-        $meta = $this->readJsonFile($this->getMetaPath($scanId));
-        return is_array($meta) ? $meta : null;
+        return $this->getStore()->getMeta($scanId);
     }
 
     /**
@@ -142,57 +171,32 @@ class ScanService extends Component
      */
     public function getResults(string $scanId): ?array
     {
-        $path = $this->getUnusedResultsPath($scanId);
-        if (!is_file($path)) {
-            return null;
-        }
-
-        $results = [];
-        foreach ($this->iterateNdjsonFile($path) as $row) {
-            if (is_array($row)) {
-                $results[] = $row;
-            }
-        }
-
-        return $results;
+        return $this->getStore()->getResults($scanId);
     }
 
     /**
-     * Whether the scan has a results file.
+     * Whether the scan has final results.
      *
      * @param string $scanId
      * @return bool
      */
     public function hasResults(string $scanId): bool
     {
-        return is_file($this->getUnusedResultsPath($scanId));
+        return $this->getStore()->hasResults($scanId);
     }
 
     /**
-     * Read last completed scan metadata.
+     * Read the latest retained completed scan metadata.
      *
      * @return array|null
      */
     public function getLastScan(): ?array
     {
-        $payload = $this->readJsonFile($this->getLastScanFilePath());
-        if (!is_array($payload)) {
-            return null;
-        }
-
-        if (empty($payload['scanId']) || empty($payload['completedAt'])) {
-            return null;
-        }
-
-        if (!$this->hasResults((string)$payload['scanId'])) {
-            return null;
-        }
-
-        return $payload;
+        return $this->getStore()->getLastScan();
     }
 
     /**
-     * Snapshot all assets in scope for the scan into chunk files.
+     * Snapshot all assets in scope for the scan into the active scan store.
      *
      * @param string $scanId
      * @return array{totalAssets:int,totalChunks:int}
@@ -200,15 +204,39 @@ class ScanService extends Component
      */
     public function snapshotAssets(string $scanId): array
     {
-        $meta = $this->requireMeta($scanId);
-        $volumeIds = array_map('intval', $meta['volumeIds'] ?? []);
-        $chunkSize = max(1, (int)($meta['assetChunkSize'] ?? self::DEFAULT_ASSET_CHUNK_SIZE));
+        $store = $this->getStore();
+        $meta = $store->getMeta($scanId);
 
-        $this->clearDirectory($this->getAssetsDirectory($scanId));
+        if ($meta === null) {
+            Logger::warning(
+                "Skipping scan setup stage because scan metadata could not be loaded.",
+                [
+                    "scanId" => $scanId,
+                    "storageMode" => $this->getStorageMode(),
+                ],
+            );
+
+            return [
+                "totalAssets" => 0,
+                "totalChunks" => 0,
+            ];
+        }
+
+        $volumeIds = array_map("intval", $meta["volumeIds"] ?? []);
+        $chunkSize = max(
+            1,
+            (int) ($meta["assetChunkSize"] ?? self::DEFAULT_ASSET_CHUNK_SIZE),
+        );
+
+        $store->resetAssetSnapshot($scanId);
+        $store->replaceUsedIds($scanId, "relations", []);
+        $store->replaceUsedIds($scanId, "content", []);
+        $store->replaceUsedIds($scanId, "final", []);
+        $store->resetResults($scanId);
 
         $query = Asset::find()
             ->status(null)
-            ->orderBy(['elements.id' => SORT_ASC]);
+            ->orderBy(["elements.id" => SORT_ASC]);
 
         if (!empty($volumeIds)) {
             $query->volumeId($volumeIds);
@@ -219,13 +247,15 @@ class ScanService extends Component
         $currentChunk = [];
         $totalAssets = 0;
 
-        $this->updateProgress($scanId, [
-            'status' => self::STATUS_RUNNING,
-            'stage' => self::STAGE_SETUP,
-            'progress' => 1,
-            'processedAssets' => 0,
-            'totalAssets' => 0,
-            'error' => null,
+        $store->updateProgress($scanId, [
+            "status" => self::STATUS_RUNNING,
+            "stage" => self::STAGE_SETUP,
+            "progress" => 1,
+            "processedAssets" => 0,
+            "totalAssets" => 0,
+            "usedCount" => 0,
+            "unusedCount" => 0,
+            "error" => null,
         ]);
 
         foreach ($query->each($chunkSize) as $asset) {
@@ -234,7 +264,11 @@ class ScanService extends Component
             $totalAssets++;
 
             if (count($currentChunk) >= $chunkSize) {
-                $this->writeAssetChunk($scanId, $chunkIndex, $currentChunk);
+                $store->storeAssetSnapshotChunk(
+                    $scanId,
+                    $chunkIndex,
+                    $currentChunk,
+                );
                 $chunkIndex++;
                 $chunkCount++;
                 $currentChunk = [];
@@ -242,125 +276,192 @@ class ScanService extends Component
         }
 
         if (!empty($currentChunk)) {
-            $this->writeAssetChunk($scanId, $chunkIndex, $currentChunk);
+            $store->storeAssetSnapshotChunk(
+                $scanId,
+                $chunkIndex,
+                $currentChunk,
+            );
             $chunkCount++;
         }
 
-        $this->touchMeta($scanId, [
-            'status' => self::STATUS_RUNNING,
-            'stage' => self::STAGE_SETUP,
-            'totalAssets' => $totalAssets,
-            'totalChunks' => $chunkCount,
-        ]);
-
-        $this->touchState($scanId, [
-            'assetsSnapshotted' => true,
+        $store->updateMeta($scanId, [
+            "status" => self::STATUS_RUNNING,
+            "stage" => self::STAGE_SETUP,
+            "totalAssets" => $totalAssets,
+            "totalChunks" => $chunkCount,
+            "processedAssets" => 0,
+            "usedCount" => 0,
+            "unusedCount" => 0,
+            "error" => null,
         ]);
 
         $progress = $totalAssets > 0 ? 10 : 100;
-        $status = $totalAssets > 0 ? self::STATUS_RUNNING : self::STATUS_COMPLETE;
+        $status =
+            $totalAssets > 0 ? self::STATUS_RUNNING : self::STATUS_COMPLETE;
 
-        $this->updateProgress($scanId, [
-            'status' => $status,
-            'stage' => $totalAssets > 0 ? self::STAGE_SETUP : self::STAGE_FINALIZE,
-            'progress' => $progress,
-            'totalAssets' => $totalAssets,
-            'processedAssets' => 0,
-            'usedCount' => 0,
-            'unusedCount' => 0,
+        $store->updateProgress($scanId, [
+            "status" => $status,
+            "stage" =>
+                $totalAssets > 0 ? self::STAGE_SETUP : self::STAGE_FINALIZE,
+            "progress" => $progress,
+            "totalAssets" => $totalAssets,
+            "processedAssets" => 0,
+            "usedCount" => 0,
+            "unusedCount" => 0,
+            "error" => null,
         ]);
 
         if ($totalAssets === 0) {
-            $this->clearDirectory($this->getUsedDirectory($scanId));
-            $this->clearDirectory($this->getResultsDirectory($scanId));
-            $this->touchState($scanId, [
-                'relationsProcessed' => true,
-                'contentProcessed' => true,
-                'finalized' => true,
-                'usedRelationCount' => 0,
-                'usedContentCount' => 0,
+            $completedAt = time();
+
+            $store->replaceUsedIds($scanId, "relations", []);
+            $store->replaceUsedIds($scanId, "content", []);
+            $store->replaceUsedIds($scanId, "final", []);
+            $store->resetResults($scanId);
+
+            $store->updateMeta($scanId, [
+                "status" => self::STATUS_COMPLETE,
+                "stage" => self::STAGE_FINALIZE,
+                "completedAt" => $completedAt,
+                "totalAssets" => 0,
+                "processedAssets" => 0,
+                "usedCount" => 0,
+                "unusedCount" => 0,
+                "error" => null,
             ]);
-            $this->touchMeta($scanId, [
-                'status' => self::STATUS_COMPLETE,
-                'stage' => self::STAGE_FINALIZE,
-                'completedAt' => time(),
+
+            $store->updateProgress($scanId, [
+                "status" => self::STATUS_COMPLETE,
+                "stage" => self::STAGE_FINALIZE,
+                "progress" => 100,
+                "totalAssets" => 0,
+                "processedAssets" => 0,
+                "usedCount" => 0,
+                "unusedCount" => 0,
+                "error" => null,
             ]);
-            $this->writeEmptyResults($scanId);
-            $this->setLastScan($scanId);
+
+            $store->setLastScan($scanId, $completedAt);
         }
 
         return [
-            'totalAssets' => $totalAssets,
-            'totalChunks' => $chunkCount,
+            "totalAssets" => $totalAssets,
+            "totalChunks" => $chunkCount,
         ];
     }
 
     /**
-     * Collect used asset IDs from the relations table in one pass over the asset chunks.
+     * Collect used asset IDs from the relations table in one pass over the
+     * stored asset snapshot.
      *
      * @param string $scanId
-     * @return int Number of unique used asset IDs found via relations.
+     * @return int
      * @throws \Throwable
      */
     public function collectRelationsUsage(string $scanId): int
     {
-        $meta = $this->requireMeta($scanId);
-        $totalChunks = max(1, (int)($meta['totalChunks'] ?? 1));
-        $chunkFiles = $this->getAssetChunkFiles($scanId);
+        $store = $this->getStore();
+        $meta = $store->getMeta($scanId);
+
+        if ($meta === null) {
+            Logger::warning(
+                "Skipping relations stage because scan metadata could not be loaded.",
+                [
+                    "scanId" => $scanId,
+                    "storageMode" => $this->getStorageMode(),
+                ],
+            );
+
+            return 0;
+        }
+
+        $chunkSize = max(
+            1,
+            (int) ($meta["assetChunkSize"] ?? self::DEFAULT_ASSET_CHUNK_SIZE),
+        );
+        $totalChunks = max(1, (int) ($meta["totalChunks"] ?? 1));
+        $includeDrafts = !empty($meta["includeDrafts"]);
+        $includeRevisions = !empty($meta["includeRevisions"]);
+        $countAllRelationsAsUsage = array_key_exists(
+            "countAllRelationsAsUsage",
+            $meta,
+        )
+            ? !empty($meta["countAllRelationsAsUsage"])
+            : true;
+        $initiatingUserId = isset($meta["initiatingUserId"])
+            ? (int) $meta["initiatingUserId"]
+            : null;
 
         $usedIds = [];
+        $currentAssetIds = [];
+        $chunkIndex = 0;
 
-        $this->writeLines($this->getUsedRelationsPath($scanId), []);
+        $store->replaceUsedIds($scanId, "relations", []);
 
-        foreach ($chunkFiles as $chunkIndex => $chunkFile) {
-            $assetIds = [];
-            foreach ($this->iterateNdjsonFile($chunkFile) as $row) {
-                if (is_array($row) && isset($row['id'])) {
-                    $assetIds[] = (int)$row['id'];
-                }
+        foreach ($store->iterateAssetSnapshot($scanId) as $row) {
+            if (!is_array($row) || !isset($row["id"])) {
+                continue;
             }
 
-            if (!empty($assetIds)) {
-                $relationIds = (new Query())
-                    ->select(['targetId'])
-                    ->distinct()
-                    ->from(Table::RELATIONS)
-                    ->where(['targetId' => $assetIds])
-                    ->column();
+            $currentAssetIds[] = (int) $row["id"];
 
-                foreach ($relationIds as $relationId) {
-                    $usedIds[(int)$relationId] = true;
-                }
+            if (count($currentAssetIds) >= $chunkSize) {
+                $this->collectRelationChunk(
+                    $currentAssetIds,
+                    $usedIds,
+                    $includeDrafts,
+                    $includeRevisions,
+                    $countAllRelationsAsUsage,
+                    $initiatingUserId,
+                );
+                $ratio = ++$chunkIndex / $totalChunks;
+
+                $store->updateProgress($scanId, [
+                    "status" => self::STATUS_RUNNING,
+                    "stage" => self::STAGE_RELATIONS,
+                    "progress" => $this->scaleProgress($ratio, 10, 25),
+                    "usedCount" => count($usedIds),
+                ]);
+
+                $currentAssetIds = [];
             }
+        }
 
-            $ratio = ($chunkIndex + 1) / $totalChunks;
-            $this->updateProgress($scanId, [
-                'status' => self::STATUS_RUNNING,
-                'stage' => self::STAGE_RELATIONS,
-                'progress' => $this->scaleProgress($ratio, 10, 25),
-                'usedCount' => count($usedIds),
+        if (!empty($currentAssetIds)) {
+            $this->collectRelationChunk(
+                $currentAssetIds,
+                $usedIds,
+                $includeDrafts,
+                $includeRevisions,
+                $countAllRelationsAsUsage,
+                $initiatingUserId,
+            );
+            $ratio = ++$chunkIndex / $totalChunks;
+
+            $store->updateProgress($scanId, [
+                "status" => self::STATUS_RUNNING,
+                "stage" => self::STAGE_RELATIONS,
+                "progress" => $this->scaleProgress($ratio, 10, 25),
+                "usedCount" => count($usedIds),
             ]);
         }
 
-        $uniqueIds = array_map('intval', array_keys($usedIds));
+        $uniqueIds = array_map("intval", array_keys($usedIds));
         sort($uniqueIds, SORT_NUMERIC);
-        $this->writeLines($this->getUsedRelationsPath($scanId), $uniqueIds);
 
-        $this->touchState($scanId, [
-            'relationsProcessed' => true,
-            'usedRelationCount' => count($uniqueIds),
+        $store->replaceUsedIds($scanId, "relations", $uniqueIds);
+
+        $store->updateMeta($scanId, [
+            "status" => self::STATUS_RUNNING,
+            "stage" => self::STAGE_RELATIONS,
+            "usedCount" => count($uniqueIds),
         ]);
 
-        $this->touchMeta($scanId, [
-            'status' => self::STATUS_RUNNING,
-            'stage' => self::STAGE_RELATIONS,
-        ]);
-
-        $this->updateProgress($scanId, [
-            'status' => self::STATUS_RUNNING,
-            'stage' => self::STAGE_RELATIONS,
-            'progress' => 25,
-            'usedCount' => count($uniqueIds),
+        $store->updateProgress($scanId, [
+            "status" => self::STATUS_RUNNING,
+            "stage" => self::STAGE_RELATIONS,
+            "progress" => 25,
+            "usedCount" => count($uniqueIds),
         ]);
 
         return count($uniqueIds);
@@ -368,94 +469,206 @@ class ScanService extends Component
 
     /**
      * Scan relevant entry/global content and resolve asset references against
-     * the asset snapshot lookup maps.
+     * the stored asset snapshot lookup maps.
      *
      * @param string $scanId
-     * @return int Number of unique used asset IDs found via content.
+     * @return int
      * @throws \Throwable
      */
     public function collectContentUsage(string $scanId): int
     {
-        $lookups = $this->buildAssetLookups($scanId);
-        $scannedIds = $lookups['scannedIds'];
-        $pathLookup = $lookups['pathLookup'];
-        $filenameLookup = $lookups['filenameLookup'];
+        $store = $this->getStore();
+        $meta = $store->getMeta($scanId);
 
-        $usedIds = [];
+        if ($meta === null) {
+            Logger::warning(
+                "Skipping content stage because scan metadata could not be loaded.",
+                [
+                    "scanId" => $scanId,
+                    "storageMode" => $this->getStorageMode(),
+                ],
+            );
 
-        $this->writeLines($this->getUsedContentPath($scanId), []);
-
-        $htmlFields = $this->getHtmlFields();
-        if (empty($htmlFields)) {
-            $this->touchState($scanId, [
-                'contentProcessed' => true,
-                'usedContentCount' => 0,
-            ]);
-            $this->updateProgress($scanId, [
-                'status' => self::STATUS_RUNNING,
-                'stage' => self::STAGE_CONTENT,
-                'progress' => 75,
-            ]);
             return 0;
         }
 
-        $fieldIds = array_values(array_filter(array_map(
-            static fn($field) => (int)($field->id ?? 0),
-            $htmlFields
-        )));
-        $relevantTypeIds = $this->getEntryTypeIdsWithFields($fieldIds);
+        $includeDrafts = !empty($meta["includeDrafts"]);
+        $includeRevisions = !empty($meta["includeRevisions"]);
+        $initiatingUserId = isset($meta["initiatingUserId"])
+            ? (int) $meta["initiatingUserId"]
+            : null;
 
-        $entryBatchSize = self::DEFAULT_ENTRY_BATCH_SIZE;
-        $entryQuery = Entry::find()
-            ->status(null)
-            ->orderBy(['elements.id' => SORT_ASC]);
+        $lookups = $this->buildAssetLookups($scanId);
+        $scannedIds = $lookups["scannedIds"];
+        $pathLookup = $lookups["pathLookup"];
+        $filenameLookup = $lookups["filenameLookup"];
 
-        if (!empty($relevantTypeIds)) {
-            $entryQuery->typeId($relevantTypeIds);
-        } else {
-            $entryQuery->id([-1]);
+        $usedIds = [];
+        $store->replaceUsedIds($scanId, "content", []);
+
+        $htmlFields = $this->getHtmlFields();
+        if (empty($htmlFields)) {
+            $store->updateMeta($scanId, [
+                "status" => self::STATUS_RUNNING,
+                "stage" => self::STAGE_CONTENT,
+            ]);
+
+            $store->updateProgress($scanId, [
+                "status" => self::STATUS_RUNNING,
+                "stage" => self::STAGE_CONTENT,
+                "progress" => 75,
+            ]);
+
+            return 0;
         }
 
-        $totalEntries = (int)$entryQuery->count();
+        $fieldIds = array_values(
+            array_filter(
+                array_map(
+                    static fn($field) => (int) ($field->id ?? 0),
+                    $htmlFields,
+                ),
+            ),
+        );
+        $relevantTypeIds = $this->getEntryTypeIdsWithFields($fieldIds);
+
+        $entryBatchSize = max(
+            1,
+            (int) ($meta["entryBatchSize"] ?? self::DEFAULT_ENTRY_BATCH_SIZE),
+        );
+        $totalEntries = $this->getContentScanEntryTotal(
+            $relevantTypeIds,
+            $includeDrafts,
+            $includeRevisions,
+            $initiatingUserId,
+        );
         $processedEntries = 0;
 
-        $this->updateProgress($scanId, [
-            'status' => self::STATUS_RUNNING,
-            'stage' => self::STAGE_CONTENT,
-            'progress' => 25,
+        $store->updateProgress($scanId, [
+            "status" => self::STATUS_RUNNING,
+            "stage" => self::STAGE_CONTENT,
+            "progress" => 25,
         ]);
 
         if ($totalEntries > 0) {
-            foreach ($entryQuery->each($entryBatchSize) as $entry) {
+            foreach (
+                $this->iterateEntriesForContentScan(
+                    $relevantTypeIds,
+                    $entryBatchSize,
+                    $includeDrafts,
+                    $includeRevisions,
+                    $initiatingUserId,
+                )
+                as $entry
+            ) {
                 /** @var Entry $entry */
+                if (
+                    $processedEntries > 0 &&
+                    $processedEntries % 25 === 0 &&
+                    !$this->scanExists($scanId)
+                ) {
+                    Logger::info(
+                        "Stopping content scan because the active scan was superseded.",
+                        [
+                            "scanId" => $scanId,
+                            "processedEntries" => $processedEntries,
+                        ],
+                    );
+
+                    return count($usedIds);
+                }
+
+                $resolvedEntry = Plugin::getInstance()->assetUsage->resolveUsageEntry(
+                    $entry,
+                    $includeDrafts,
+                    $includeRevisions,
+                );
+
+                if ($resolvedEntry === null) {
+                    $processedEntries++;
+                    if (
+                        $processedEntries % 25 === 0 ||
+                        $processedEntries === $totalEntries
+                    ) {
+                        $ratio =
+                            $totalEntries > 0
+                                ? $processedEntries / $totalEntries
+                                : 1.0;
+
+                        $store->updateProgress($scanId, [
+                            "status" => self::STATUS_RUNNING,
+                            "stage" => self::STAGE_CONTENT,
+                            "progress" => $this->scaleProgress($ratio, 25, 70),
+                            "usedCount" => count($usedIds),
+                        ]);
+                    }
+                    continue;
+                }
+
                 foreach ($htmlFields as $field) {
                     try {
                         $fieldValue = $entry->getFieldValue($field->handle);
-                    } catch (\Throwable) {
+                    } catch (\Throwable $e) {
+                        Logger::warning(
+                            "Skipping field during content scan because its value could not be read.",
+                            [
+                                "scanId" => $scanId,
+                                "entryId" => (int) ($entry->id ?? 0),
+                                "fieldHandle" => (string) ($field->handle ?? ""),
+                                "error" => $e->getMessage(),
+                            ],
+                        );
                         continue;
                     }
 
                     $content = $this->normalizeFieldValueToString($fieldValue);
-                    if ($content === '') {
+                    if ($content === "") {
                         continue;
                     }
 
-                    foreach ($this->extractReferencedAssetIds($content, $scannedIds, $pathLookup, $filenameLookup) as $assetId) {
+                    foreach (
+                        $this->extractReferencedAssetIds(
+                            $content,
+                            $scannedIds,
+                            $pathLookup,
+                            $filenameLookup,
+                        )
+                        as $assetId
+                    ) {
                         $usedIds[$assetId] = true;
                     }
                 }
 
                 $processedEntries++;
-                if (($processedEntries % 25) === 0 || $processedEntries === $totalEntries) {
-                    $ratio = $totalEntries > 0 ? ($processedEntries / $totalEntries) : 1.0;
-                    $this->updateProgress($scanId, [
-                        'status' => self::STATUS_RUNNING,
-                        'stage' => self::STAGE_CONTENT,
-                        'progress' => $this->scaleProgress($ratio, 25, 70),
-                        'usedCount' => count($usedIds),
+                if (
+                    $processedEntries % 25 === 0 ||
+                    $processedEntries === $totalEntries
+                ) {
+                    $ratio =
+                        $totalEntries > 0
+                            ? $processedEntries / $totalEntries
+                            : 1.0;
+
+                    $store->updateProgress($scanId, [
+                        "status" => self::STATUS_RUNNING,
+                        "stage" => self::STAGE_CONTENT,
+                        "progress" => $this->scaleProgress($ratio, 25, 70),
+                        "usedCount" => count($usedIds),
                     ]);
                 }
             }
+        }
+
+        if (!$this->scanExists($scanId)) {
+            Logger::info(
+                "Stopping content scan before global set scanning because the active scan was superseded.",
+                [
+                    "scanId" => $scanId,
+                    "processedEntries" => $processedEntries,
+                ],
+            );
+
+            return count($usedIds);
         }
 
         foreach (GlobalSet::find()->all() as $globalSet) {
@@ -470,43 +683,64 @@ class ScanService extends Component
                     continue;
                 }
 
-                $content = $this->normalizeFieldValueToString($globalSet->getFieldValue($field->handle));
-                if ($content === '') {
+                try {
+                    $fieldValue = $globalSet->getFieldValue($field->handle);
+                } catch (\Throwable $e) {
+                    Logger::warning(
+                        "Skipping global set field during content scan because its value could not be read.",
+                        [
+                            "scanId" => $scanId,
+                            "globalSetId" => (int) ($globalSet->id ?? 0),
+                            "fieldHandle" => (string) ($field->handle ?? ""),
+                            "error" => $e->getMessage(),
+                        ],
+                    );
                     continue;
                 }
 
-                foreach ($this->extractReferencedAssetIds($content, $scannedIds, $pathLookup, $filenameLookup) as $assetId) {
+                $content = $this->normalizeFieldValueToString($fieldValue);
+                if ($content === "") {
+                    continue;
+                }
+
+                foreach (
+                    $this->extractReferencedAssetIds(
+                        $content,
+                        $scannedIds,
+                        $pathLookup,
+                        $filenameLookup,
+                    )
+                    as $assetId
+                ) {
                     $usedIds[$assetId] = true;
                 }
             }
         }
 
-        $uniqueIds = array_map('intval', array_keys($usedIds));
+        $uniqueIds = array_map("intval", array_keys($usedIds));
         sort($uniqueIds, SORT_NUMERIC);
-        $this->writeLines($this->getUsedContentPath($scanId), $uniqueIds);
 
-        $this->touchState($scanId, [
-            'contentProcessed' => true,
-            'usedContentCount' => count($uniqueIds),
+        $store->replaceUsedIds($scanId, "content", $uniqueIds);
+
+        $store->updateMeta($scanId, [
+            "status" => self::STATUS_RUNNING,
+            "stage" => self::STAGE_CONTENT,
+            "usedCount" => count($uniqueIds),
         ]);
 
-        $this->touchMeta($scanId, [
-            'status' => self::STATUS_RUNNING,
-            'stage' => self::STAGE_CONTENT,
-        ]);
-
-        $this->updateProgress($scanId, [
-            'status' => self::STATUS_RUNNING,
-            'stage' => self::STAGE_CONTENT,
-            'progress' => 75,
-            'usedCount' => count($uniqueIds),
+        $store->updateProgress($scanId, [
+            "status" => self::STATUS_RUNNING,
+            "stage" => self::STAGE_CONTENT,
+            "progress" => 75,
+            "usedCount" => count($uniqueIds),
         ]);
 
         return count($uniqueIds);
     }
 
     /**
-     * Merge used IDs, classify the asset snapshot, and build final unused results.
+     * Merge used IDs, classify the asset snapshot, and build final unused
+     * results.
      *
      * @param string $scanId
      * @return array{usedCount:int,unusedCount:int}
@@ -514,74 +748,100 @@ class ScanService extends Component
      */
     public function finalizeScan(string $scanId): array
     {
-        $meta = $this->requireMeta($scanId);
-        $totalAssets = (int)($meta['totalAssets'] ?? 0);
-        $usedIds = $this->readMergedUsedIds($scanId);
+        $store = $this->getStore();
+        $meta = $store->getMeta($scanId);
+
+        if ($meta === null) {
+            Logger::warning(
+                "Skipping finalize stage because scan metadata could not be loaded.",
+                [
+                    "scanId" => $scanId,
+                    "storageMode" => $this->getStorageMode(),
+                ],
+            );
+
+            return [
+                "usedCount" => 0,
+                "unusedCount" => 0,
+            ];
+        }
+
+        $totalAssets = (int) ($meta["totalAssets"] ?? 0);
+        $usedIds = $store->getMergedUsedIds($scanId);
         $usedLookup = array_fill_keys($usedIds, true);
 
-        $this->writeLines($this->getUsedFinalPath($scanId), $usedIds);
-        $this->writeLines($this->getUnusedIdsPath($scanId), []);
-        $this->clearResults($scanId);
+        $store->replaceUsedIds($scanId, "final", $usedIds);
+        $store->resetResults($scanId);
 
         $unusedIds = [];
         $processedAssets = 0;
 
-        foreach ($this->getAssetChunkFiles($scanId) as $chunkFile) {
-            foreach ($this->iterateNdjsonFile($chunkFile) as $row) {
-                if (!is_array($row) || !isset($row['id'])) {
-                    continue;
-                }
+        foreach ($store->iterateAssetSnapshot($scanId) as $row) {
+            if (!is_array($row) || !isset($row["id"])) {
+                continue;
+            }
 
-                $assetId = (int)$row['id'];
-                if (!isset($usedLookup[$assetId])) {
-                    $unusedIds[] = $assetId;
-                }
+            $assetId = (int) $row["id"];
+            if (!isset($usedLookup[$assetId])) {
+                $unusedIds[] = $assetId;
+            }
 
-                $processedAssets++;
-                if (($processedAssets % 100) === 0 || $processedAssets === $totalAssets) {
-                    $ratio = $totalAssets > 0 ? ($processedAssets / $totalAssets) : 1.0;
-                    $this->updateProgress($scanId, [
-                        'status' => self::STATUS_RUNNING,
-                        'stage' => self::STAGE_FINALIZE,
-                        'progress' => $this->scaleProgress($ratio, 75, 95),
-                        'processedAssets' => $processedAssets,
-                        'usedCount' => count($usedIds),
-                        'unusedCount' => count($unusedIds),
-                    ]);
-                }
+            $processedAssets++;
+            if (
+                $processedAssets % 100 === 0 ||
+                $processedAssets === $totalAssets
+            ) {
+                $ratio =
+                    $totalAssets > 0 ? $processedAssets / $totalAssets : 1.0;
+
+                $store->updateProgress($scanId, [
+                    "status" => self::STATUS_RUNNING,
+                    "stage" => self::STAGE_FINALIZE,
+                    "progress" => $this->scaleProgress($ratio, 75, 95),
+                    "processedAssets" => $processedAssets,
+                    "usedCount" => count($usedIds),
+                    "unusedCount" => count($unusedIds),
+                ]);
             }
         }
 
-        sort($unusedIds, SORT_NUMERIC);
-        $this->writeLines($this->getUnusedIdsPath($scanId), $unusedIds);
-        $unusedCount = $this->writeUnusedResults($scanId, $unusedIds);
+        $unusedCount = 0;
+        foreach (
+            array_chunk($unusedIds, self::DEFAULT_RESULT_QUERY_CHUNK_SIZE)
+            as $idChunk
+        ) {
+            $rows = $this->buildUnusedAssetRows($idChunk);
+            $unusedCount += count($rows);
+            $store->appendResultRows($scanId, $rows);
+        }
 
         $completedAt = time();
 
-        $this->touchState($scanId, [
-            'finalized' => true,
+        $store->updateMeta($scanId, [
+            "status" => self::STATUS_COMPLETE,
+            "stage" => self::STAGE_FINALIZE,
+            "completedAt" => $completedAt,
+            "processedAssets" => $totalAssets,
+            "usedCount" => count($usedIds),
+            "unusedCount" => $unusedCount,
+            "error" => null,
         ]);
 
-        $this->touchMeta($scanId, [
-            'status' => self::STATUS_COMPLETE,
-            'stage' => self::STAGE_FINALIZE,
-            'completedAt' => $completedAt,
+        $store->updateProgress($scanId, [
+            "status" => self::STATUS_COMPLETE,
+            "stage" => self::STAGE_FINALIZE,
+            "progress" => 100,
+            "processedAssets" => $totalAssets,
+            "usedCount" => count($usedIds),
+            "unusedCount" => $unusedCount,
+            "error" => null,
         ]);
 
-        $this->updateProgress($scanId, [
-            'status' => self::STATUS_COMPLETE,
-            'stage' => self::STAGE_FINALIZE,
-            'progress' => 100,
-            'processedAssets' => $totalAssets,
-            'usedCount' => count($usedIds),
-            'unusedCount' => $unusedCount,
-        ]);
-
-        $this->setLastScan($scanId, $completedAt);
+        $store->setLastScan($scanId, $completedAt);
 
         return [
-            'usedCount' => count($usedIds),
-            'unusedCount' => $unusedCount,
+            "usedCount" => count($usedIds),
+            "unusedCount" => $unusedCount,
         ];
     }
 
@@ -594,16 +854,11 @@ class ScanService extends Component
      */
     public function failScan(string $scanId, \Throwable|string $error): void
     {
-        $message = $error instanceof \Throwable ? $error->getMessage() : (string)$error;
-
-        $this->touchMeta($scanId, [
-            'status' => self::STATUS_FAILED,
-        ]);
-
-        $this->updateProgress($scanId, [
-            'status' => self::STATUS_FAILED,
-            'error' => $message,
-        ]);
+        $message =
+            $error instanceof \Throwable
+                ? $error->getMessage()
+                : (string) $error;
+        $this->getStore()->failScan($scanId, $message);
     }
 
     /**
@@ -615,242 +870,204 @@ class ScanService extends Component
     public function getStageLabel(string $stage): string
     {
         return match ($stage) {
-            self::STAGE_SETUP => Craft::t('asset-cleaner', 'Preparing asset snapshot...'),
-            self::STAGE_RELATIONS => Craft::t('asset-cleaner', 'Scanning relations...'),
-            self::STAGE_CONTENT => Craft::t('asset-cleaner', 'Scanning content...'),
-            self::STAGE_FINALIZE => Craft::t('asset-cleaner', 'Finalizing results...'),
-            default => Craft::t('asset-cleaner', 'Scanning...'),
+            self::STAGE_SETUP => Craft::t(
+                "asset-cleaner",
+                "Preparing asset snapshot...",
+            ),
+            self::STAGE_RELATIONS => Craft::t(
+                "asset-cleaner",
+                "Scanning relations...",
+            ),
+            self::STAGE_CONTENT => Craft::t(
+                "asset-cleaner",
+                "Scanning content...",
+            ),
+            self::STAGE_FINALIZE => Craft::t(
+                "asset-cleaner",
+                "Finalizing results...",
+            ),
+            default => Craft::t("asset-cleaner", "Scanning..."),
         };
     }
 
     /**
-     * Delete scan workspaces older than the provided age.
+     * Resolve the active scan store.
      *
-     * @param int $maxAgeSeconds
-     * @return int
+     * @return ScanStoreInterface
      */
-    public function pruneOldScans(int $maxAgeSeconds = 604800): int
+    private function getStore(): ScanStoreInterface
     {
-        $deleted = 0;
-        $root = $this->getScansRootPath();
+        $mode = $this->getStorageMode();
 
-        if (!is_dir($root)) {
-            return 0;
+        if (!isset($this->stores[$mode])) {
+            $this->stores[$mode] = match ($mode) {
+                Settings::STORAGE_MODE_DATABASE => new DbScanStore(),
+                default => new FileScanStore(),
+            };
         }
 
-        $now = time();
-        $entries = scandir($root);
-        if ($entries === false) {
-            return 0;
+        return $this->stores[$mode];
+    }
+
+    /**
+     * Resolve the configured storage mode with config override precedence.
+     *
+     * @return string
+     */
+    private function getStorageMode(): string
+    {
+        $configMode = $this->getConfiguredStorageMode();
+        if ($configMode !== null) {
+            return $configMode;
         }
 
-        foreach ($entries as $entry) {
-            if ($entry === '.' || $entry === '..') {
-                continue;
+        $settings = Plugin::getInstance()->getSettings();
+        if ($settings instanceof Settings && $settings->isDatabaseMode()) {
+            return Settings::STORAGE_MODE_DATABASE;
+        }
+
+        return Settings::STORAGE_MODE_FILE;
+    }
+
+    /**
+     * @return string|null
+     */
+    private function getConfiguredStorageMode(): ?string
+    {
+        $configuredMode = null;
+
+        try {
+            $config = Craft::$app
+                ->getConfig()
+                ->getConfigFromFile("asset-cleaner");
+            if (
+                is_array($config) &&
+                isset($config["scanStorageMode"]) &&
+                is_string($config["scanStorageMode"])
+            ) {
+                $configuredMode = trim(
+                    Craft::parseEnv($config["scanStorageMode"]),
+                );
             }
+        } catch (\Throwable $e) {
+            Logger::warning(
+                "Could not load Asset Cleaner config while resolving scan storage mode.",
+                [
+                    "error" => $e->getMessage(),
+                ],
+            );
+        }
 
-            $path = $root . DIRECTORY_SEPARATOR . $entry;
-            if (!is_dir($path)) {
-                continue;
+        $envMode = getenv("ASSET_CLEANER_SCAN_STORAGE_MODE");
+        if (is_string($envMode) && trim($envMode) !== "") {
+            $configuredMode = trim($envMode);
+        }
+
+        return in_array(
+            $configuredMode,
+            [Settings::STORAGE_MODE_FILE, Settings::STORAGE_MODE_DATABASE],
+            true,
+        )
+            ? $configuredMode
+            : null;
+    }
+
+    /**
+     * Resolve the configured default draft-inclusion policy, if any.
+     *
+     * Supported sources:
+     * - config/asset-cleaner.php => includeDraftsByDefault
+     * - ASSET_CLEANER_INCLUDE_DRAFTS environment variable
+     *
+     * @return bool|null
+     */
+    private function getConfiguredIncludeDrafts(): ?bool
+    {
+        $configuredValue = null;
+
+        try {
+            $config = Craft::$app
+                ->getConfig()
+                ->getConfigFromFile("asset-cleaner");
+            if (
+                is_array($config) &&
+                array_key_exists("includeDraftsByDefault", $config)
+            ) {
+                $configuredValue = filter_var(
+                    Craft::parseEnv((string) $config["includeDraftsByDefault"]),
+                    FILTER_VALIDATE_BOOLEAN,
+                    FILTER_NULL_ON_FAILURE,
+                );
             }
+        } catch (\Throwable $e) {
+            Logger::warning(
+                "Could not load Asset Cleaner config while resolving draft inclusion defaults.",
+                [
+                    "error" => $e->getMessage(),
+                ],
+            );
+        }
 
-            $meta = $this->readJsonFile($path . DIRECTORY_SEPARATOR . 'meta.json');
-            $updatedAt = is_array($meta) ? (int)($meta['updatedAt'] ?? $meta['createdAt'] ?? 0) : 0;
-            if ($updatedAt > 0 && ($now - $updatedAt) > $maxAgeSeconds) {
-                FileHelper::removeDirectory($path);
-                $deleted++;
+        $envValue = getenv("ASSET_CLEANER_INCLUDE_DRAFTS");
+        if (is_string($envValue) && trim($envValue) !== "") {
+            $configuredValue = filter_var(
+                trim($envValue),
+                FILTER_VALIDATE_BOOLEAN,
+                FILTER_NULL_ON_FAILURE,
+            );
+        }
+
+        return $configuredValue;
+    }
+
+    /**
+     * Resolve the configured default revision-inclusion policy, if any.
+     *
+     * Supported sources:
+     * - config/asset-cleaner.php => includeRevisionsByDefault
+     * - ASSET_CLEANER_INCLUDE_REVISIONS environment variable
+     *
+     * @return bool|null
+     */
+    private function getConfiguredIncludeRevisions(): ?bool
+    {
+        $configuredValue = null;
+
+        try {
+            $config = Craft::$app
+                ->getConfig()
+                ->getConfigFromFile("asset-cleaner");
+            if (
+                is_array($config) &&
+                array_key_exists("includeRevisionsByDefault", $config)
+            ) {
+                $configuredValue = filter_var(
+                    Craft::parseEnv(
+                        (string) $config["includeRevisionsByDefault"],
+                    ),
+                    FILTER_VALIDATE_BOOLEAN,
+                    FILTER_NULL_ON_FAILURE,
+                );
             }
+        } catch (\Throwable $e) {
+            Logger::warning(
+                "Could not load Asset Cleaner config while resolving revision inclusion defaults.",
+                [
+                    "error" => $e->getMessage(),
+                ],
+            );
         }
 
-        return $deleted;
-    }
-
-    /**
-     * @return string
-     */
-    public function getBaseStoragePath(): string
-    {
-        return Craft::getAlias('@storage') . DIRECTORY_SEPARATOR . 'asset-cleaner';
-    }
-
-    /**
-     * @return string
-     */
-    public function getScansRootPath(): string
-    {
-        return $this->getBaseStoragePath() . DIRECTORY_SEPARATOR . 'scans';
-    }
-
-    /**
-     * @param string $scanId
-     * @return string
-     */
-    public function getScanPath(string $scanId): string
-    {
-        return $this->getScansRootPath() . DIRECTORY_SEPARATOR . $scanId;
-    }
-
-    /**
-     * @param string $scanId
-     * @return string
-     */
-    public function getMetaPath(string $scanId): string
-    {
-        return $this->getScanPath($scanId) . DIRECTORY_SEPARATOR . 'meta.json';
-    }
-
-    /**
-     * @param string $scanId
-     * @return string
-     */
-    public function getProgressPath(string $scanId): string
-    {
-        return $this->getScanPath($scanId) . DIRECTORY_SEPARATOR . 'progress.json';
-    }
-
-    /**
-     * @param string $scanId
-     * @return string
-     */
-    public function getStatePath(string $scanId): string
-    {
-        return $this->getScanPath($scanId) . DIRECTORY_SEPARATOR . 'state.json';
-    }
-
-    /**
-     * @param string $scanId
-     * @return string
-     */
-    public function getAssetsDirectory(string $scanId): string
-    {
-        return $this->getScanPath($scanId) . DIRECTORY_SEPARATOR . 'assets';
-    }
-
-    /**
-     * @param string $scanId
-     * @return string
-     */
-    public function getUsedDirectory(string $scanId): string
-    {
-        return $this->getScanPath($scanId) . DIRECTORY_SEPARATOR . 'used';
-    }
-
-    /**
-     * @param string $scanId
-     * @return string
-     */
-    public function getResultsDirectory(string $scanId): string
-    {
-        return $this->getScanPath($scanId) . DIRECTORY_SEPARATOR . 'results';
-    }
-
-    /**
-     * @param string $scanId
-     * @return string
-     */
-    public function getUsedRelationsPath(string $scanId): string
-    {
-        return $this->getUsedDirectory($scanId) . DIRECTORY_SEPARATOR . 'relations.txt';
-    }
-
-    /**
-     * @param string $scanId
-     * @return string
-     */
-    public function getUsedContentPath(string $scanId): string
-    {
-        return $this->getUsedDirectory($scanId) . DIRECTORY_SEPARATOR . 'content.txt';
-    }
-
-    /**
-     * @param string $scanId
-     * @return string
-     */
-    public function getUsedFinalPath(string $scanId): string
-    {
-        return $this->getUsedDirectory($scanId) . DIRECTORY_SEPARATOR . 'final.txt';
-    }
-
-    /**
-     * @param string $scanId
-     * @return string
-     */
-    public function getUnusedIdsPath(string $scanId): string
-    {
-        return $this->getResultsDirectory($scanId) . DIRECTORY_SEPARATOR . 'unused-ids.txt';
-    }
-
-    /**
-     * @param string $scanId
-     * @return string
-     */
-    public function getUnusedResultsPath(string $scanId): string
-    {
-        return $this->getResultsDirectory($scanId) . DIRECTORY_SEPARATOR . 'unused.ndjson';
-    }
-
-    /**
-     * @return string
-     */
-    private function getLastScanFilePath(): string
-    {
-        return $this->getBaseStoragePath() . DIRECTORY_SEPARATOR . self::LAST_SCAN_FILE;
-    }
-
-    /**
-     * @return void
-     * @throws Exception
-     */
-    private function ensureBaseDirectories(): void
-    {
-        FileHelper::createDirectory($this->getBaseStoragePath());
-        FileHelper::createDirectory($this->getScansRootPath());
-    }
-
-    /**
-     * @param string $scanId
-     * @return array
-     * @throws Exception
-     */
-    private function requireMeta(string $scanId): array
-    {
-        $meta = $this->getMeta($scanId);
-        if ($meta === null) {
-            throw new Exception("Scan metadata not found for '{$scanId}'.");
+        $envValue = getenv("ASSET_CLEANER_INCLUDE_REVISIONS");
+        if (is_string($envValue) && trim($envValue) !== "") {
+            $configuredValue = filter_var(
+                trim($envValue),
+                FILTER_VALIDATE_BOOLEAN,
+                FILTER_NULL_ON_FAILURE,
+            );
         }
 
-        return $meta;
-    }
-
-    /**
-     * @param string $scanId
-     * @param array $chunk
-     * @return void
-     * @throws Exception
-     */
-    private function writeAssetChunk(string $scanId, int $chunkIndex, array $chunk): void
-    {
-        $filename = sprintf('chunk-%06d.ndjson', $chunkIndex + 1);
-        $path = $this->getAssetsDirectory($scanId) . DIRECTORY_SEPARATOR . $filename;
-
-        $this->writeNdjsonFile($path, $chunk);
-    }
-
-    /**
-     * @param string $scanId
-     * @return array<int,string>
-     */
-    private function getAssetChunkFiles(string $scanId): array
-    {
-        $directory = $this->getAssetsDirectory($scanId);
-        if (!is_dir($directory)) {
-            return [];
-        }
-
-        $files = glob($directory . DIRECTORY_SEPARATOR . 'chunk-*.ndjson') ?: [];
-        sort($files, SORT_NATURAL);
-
-        return array_values($files);
+        return $configuredValue;
     }
 
     /**
@@ -859,7 +1076,6 @@ class ScanService extends Component
      */
     private function buildAssetSnapshotRecord(Asset $asset): array
     {
-        $volume = null;
         $volumeHandle = null;
         $volumePathPrefixes = [];
 
@@ -867,57 +1083,74 @@ class ScanService extends Component
             $volume = $asset->getVolume();
             if ($volume) {
                 $volumeHandle = $volume->handle;
-                $volumePathPrefixes = $this->buildVolumePathPrefixes($volume, $volumeHandle);
+                $volumePathPrefixes = $this->buildVolumePathPrefixes(
+                    $volume,
+                    $volumeHandle,
+                );
             }
         } catch (\Throwable) {
-            $volume = null;
             $volumeHandle = null;
             $volumePathPrefixes = [];
         }
 
         return [
-            'id' => (int)$asset->id,
-            'filename' => (string)$asset->filename,
-            'volumeId' => (int)$asset->volumeId,
-            'volumeHandle' => $volumeHandle,
-            'folderPath' => (string)($asset->folderPath ?? ''),
-            'pathCandidates' => array_values($this->buildAssetPathCandidates($asset, $volumeHandle, $volumePathPrefixes)),
+            "id" => (int) $asset->id,
+            "filename" => (string) $asset->filename,
+            "volumeId" => (int) $asset->volumeId,
+            "volumeHandle" => $volumeHandle,
+            "folderPath" => (string) ($asset->folderPath ?? ""),
+            "pathCandidates" => array_values(
+                $this->buildAssetPathCandidates(
+                    $asset,
+                    $volumeHandle,
+                    $volumePathPrefixes,
+                ),
+            ),
         ];
     }
 
     /**
      * @param Asset $asset
      * @param string|null $volumeHandle
+     * @param array $volumePathPrefixes
      * @return array<string,string>
      */
-    private function buildAssetPathCandidates(Asset $asset, ?string $volumeHandle, array $volumePathPrefixes = []): array
-    {
+    private function buildAssetPathCandidates(
+        Asset $asset,
+        ?string $volumeHandle,
+        array $volumePathPrefixes = [],
+    ): array {
         $candidates = [];
 
-        $filename = trim((string)$asset->filename);
-        if ($filename === '') {
+        $filename = trim((string) $asset->filename);
+        if ($filename === "") {
             return [];
         }
 
-        $folderPath = trim((string)($asset->folderPath ?? ''), '/');
-        $relativePath = $folderPath !== ''
-            ? $folderPath . '/' . $filename
-            : $filename;
+        $folderPath = trim((string) ($asset->folderPath ?? ""), "/");
+        $relativePath =
+            $folderPath !== "" ? $folderPath . "/" . $filename : $filename;
 
         foreach ($this->normalizePathCandidates($relativePath) as $candidate) {
             $candidates[$candidate] = $candidate;
         }
 
         if ($volumeHandle) {
-            $volumeRelative = trim($volumeHandle . '/' . $relativePath, '/');
-            foreach ($this->normalizePathCandidates($volumeRelative) as $candidate) {
+            $volumeRelative = trim($volumeHandle . "/" . $relativePath, "/");
+            foreach (
+                $this->normalizePathCandidates($volumeRelative)
+                as $candidate
+            ) {
                 $candidates[$candidate] = $candidate;
             }
         }
 
         foreach ($volumePathPrefixes as $prefix) {
-            $prefixedPath = trim($prefix . '/' . $relativePath, '/');
-            foreach ($this->normalizePathCandidates($prefixedPath) as $candidate) {
+            $prefixedPath = trim($prefix . "/" . $relativePath, "/");
+            foreach (
+                $this->normalizePathCandidates($prefixedPath)
+                as $candidate
+            ) {
                 $candidates[$candidate] = $candidate;
             }
         }
@@ -930,8 +1163,10 @@ class ScanService extends Component
      * @param string|null $volumeHandle
      * @return array<int,string>
      */
-    private function buildVolumePathPrefixes(mixed $volume, ?string $volumeHandle): array
-    {
+    private function buildVolumePathPrefixes(
+        mixed $volume,
+        ?string $volumeHandle,
+    ): array {
         $prefixes = [];
 
         if ($volumeHandle) {
@@ -941,31 +1176,37 @@ class ScanService extends Component
         try {
             $fs = $volume?->getFs();
             if ($fs) {
-                if (method_exists($fs, 'getRootUrl')) {
+                if (method_exists($fs, "getRootUrl")) {
                     $rootUrl = $fs->getRootUrl();
-                    if (is_string($rootUrl) && $rootUrl !== '') {
+                    if (is_string($rootUrl) && $rootUrl !== "") {
                         $rootPath = parse_url($rootUrl, PHP_URL_PATH);
-                        if (is_string($rootPath) && $rootPath !== '') {
-                            $prefixes[] = trim($rootPath, '/');
+                        if (is_string($rootPath) && $rootPath !== "") {
+                            $prefixes[] = trim($rootPath, "/");
                         }
                     }
                 }
 
-                if (method_exists($fs, 'getRootPath')) {
+                if (method_exists($fs, "getRootPath")) {
                     $rootPath = $fs->getRootPath();
-                    if (is_string($rootPath) && $rootPath !== '') {
-                        $prefixes[] = trim(basename($rootPath), '/');
+                    if (is_string($rootPath) && $rootPath !== "") {
+                        $prefixes[] = trim(basename($rootPath), "/");
                     }
                 }
             }
         } catch (\Throwable) {
-            // Ignore inaccessible FS metadata
+            // Ignore inaccessible FS metadata.
         }
 
-        return array_values(array_unique(array_filter($prefixes, static fn($prefix) => $prefix !== '')));
+        return array_values(
+            array_unique(
+                array_filter($prefixes, static fn($prefix) => $prefix !== ""),
+            ),
+        );
     }
 
     /**
+     * Build lookup maps from the stored asset snapshot.
+     *
      * @param string $scanId
      * @return array{
      *     scannedIds: array<int,bool>,
@@ -979,44 +1220,48 @@ class ScanService extends Component
         $pathLookup = [];
         $filenameLookup = [];
 
-        foreach ($this->getAssetChunkFiles($scanId) as $chunkFile) {
-            foreach ($this->iterateNdjsonFile($chunkFile) as $row) {
-                if (!is_array($row) || !isset($row['id'])) {
-                    continue;
-                }
+        foreach ($this->getStore()->iterateAssetSnapshot($scanId) as $row) {
+            if (!is_array($row) || !isset($row["id"])) {
+                continue;
+            }
 
-                $assetId = (int)$row['id'];
-                $scannedIds[$assetId] = true;
+            $assetId = (int) $row["id"];
+            $scannedIds[$assetId] = true;
 
-                $filename = trim((string)($row['filename'] ?? ''));
-                if ($filename !== '') {
-                    $key = mb_strtolower($filename);
-                    $filenameLookup[$key] ??= [];
-                    $filenameLookup[$key][] = $assetId;
-                }
+            $filename = trim((string) ($row["filename"] ?? ""));
+            if ($filename !== "") {
+                $key = mb_strtolower($filename);
+                $filenameLookup[$key] ??= [];
+                $filenameLookup[$key][] = $assetId;
+            }
 
-                foreach ((array)($row['pathCandidates'] ?? []) as $candidate) {
-                    $normalizedVariants = $this->normalizePathCandidates((string)$candidate);
-                    foreach ($normalizedVariants as $variant) {
-                        $pathLookup[$variant] ??= [];
-                        $pathLookup[$variant][] = $assetId;
-                    }
+            foreach ((array) ($row["pathCandidates"] ?? []) as $candidate) {
+                foreach (
+                    $this->normalizePathCandidates((string) $candidate)
+                    as $variant
+                ) {
+                    $pathLookup[$variant] ??= [];
+                    $pathLookup[$variant][] = $assetId;
                 }
             }
         }
 
         foreach ($pathLookup as $key => $ids) {
-            $pathLookup[$key] = array_values(array_unique(array_map('intval', $ids)));
+            $pathLookup[$key] = array_values(
+                array_unique(array_map("intval", $ids)),
+            );
         }
 
         foreach ($filenameLookup as $key => $ids) {
-            $filenameLookup[$key] = array_values(array_unique(array_map('intval', $ids)));
+            $filenameLookup[$key] = array_values(
+                array_unique(array_map("intval", $ids)),
+            );
         }
 
         return [
-            'scannedIds' => $scannedIds,
-            'pathLookup' => $pathLookup,
-            'filenameLookup' => $filenameLookup,
+            "scannedIds" => $scannedIds,
+            "pathLookup" => $pathLookup,
+            "filenameLookup" => $filenameLookup,
         ];
     }
 
@@ -1027,7 +1272,9 @@ class ScanService extends Component
     {
         $fields = Craft::$app->getFields()->getAllFields();
 
-        return array_values(array_filter($fields, fn($field) => $this->isHtmlField($field)));
+        return array_values(
+            array_filter($fields, fn($field) => $this->isHtmlField($field)),
+        );
     }
 
     /**
@@ -1040,10 +1287,11 @@ class ScanService extends Component
             return false;
         }
 
-        return in_array(get_class($field), [
-            'craft\\redactor\\Field',
-            'craft\\ckeditor\\Field',
-        ], true);
+        return in_array(
+            get_class($field),
+            ['craft\\redactor\\Field', "craft\\ckeditor\\Field"],
+            true,
+        );
     }
 
     /**
@@ -1059,8 +1307,8 @@ class ScanService extends Component
         $relevantLayoutIds = [];
         foreach (Craft::$app->getFields()->getAllLayouts() as $layout) {
             foreach ($layout->getCustomFields() as $field) {
-                if (in_array((int)$field->id, $fieldIds, true)) {
-                    $relevantLayoutIds[] = (int)$layout->id;
+                if (in_array((int) $field->id, $fieldIds, true)) {
+                    $relevantLayoutIds[] = (int) $layout->id;
                     break;
                 }
             }
@@ -1071,12 +1319,16 @@ class ScanService extends Component
         }
 
         return array_map(
-            'intval',
+            "intval",
             (new Query())
-                ->select(['id'])
-                ->from('{{%entrytypes}}')
-                ->where(['fieldLayoutId' => array_values(array_unique($relevantLayoutIds))])
-                ->column()
+                ->select(["id"])
+                ->from("{{%entrytypes}}")
+                ->where([
+                    "fieldLayoutId" => array_values(
+                        array_unique($relevantLayoutIds),
+                    ),
+                ])
+                ->column(),
         );
     }
 
@@ -1088,11 +1340,14 @@ class ScanService extends Component
     {
         if ($fieldValue instanceof \craft\redactor\FieldData) {
             $fieldValue = $fieldValue->getRawContent();
-        } elseif (is_object($fieldValue) && method_exists($fieldValue, '__toString')) {
-            $fieldValue = (string)$fieldValue;
+        } elseif (
+            is_object($fieldValue) &&
+            method_exists($fieldValue, "__toString")
+        ) {
+            $fieldValue = (string) $fieldValue;
         }
 
-        return is_string($fieldValue) ? $fieldValue : '';
+        return is_string($fieldValue) ? $fieldValue : "";
     }
 
     /**
@@ -1113,22 +1368,28 @@ class ScanService extends Component
         string $content,
         array $scannedIds,
         array $pathLookup,
-        array $filenameLookup
+        array $filenameLookup,
     ): array {
         $found = [];
 
-        if (preg_match_all('/data-asset-id\s*=\s*["\']?(\d+)["\']?/i', $content, $matches)) {
+        if (
+            preg_match_all(
+                '/data-asset-id\s*=\s*["\']?(\d+)["\']?/i',
+                $content,
+                $matches,
+            )
+        ) {
             foreach ($matches[1] as $id) {
-                $assetId = (int)$id;
+                $assetId = (int) $id;
                 if (isset($scannedIds[$assetId])) {
                     $found[$assetId] = true;
                 }
             }
         }
 
-        if (preg_match_all('/#asset:(\d+)/i', $content, $matches)) {
+        if (preg_match_all("/#asset:(\d+)/i", $content, $matches)) {
             foreach ($matches[1] as $id) {
-                $assetId = (int)$id;
+                $assetId = (int) $id;
                 if (isset($scannedIds[$assetId])) {
                     $found[$assetId] = true;
                 }
@@ -1137,16 +1398,28 @@ class ScanService extends Component
 
         $rawReferences = [];
 
-        if (preg_match_all('/\b(?:src|href|poster)\s*=\s*["\']([^"\']+)["\']/i', $content, $matches)) {
+        if (
+            preg_match_all(
+                '/\b(?:src|href|poster)\s*=\s*["\']([^"\']+)["\']/i',
+                $content,
+                $matches,
+            )
+        ) {
             foreach ($matches[1] as $value) {
                 $rawReferences[] = $value;
             }
         }
 
-        if (preg_match_all('/\bsrcset\s*=\s*["\']([^"\']+)["\']/i', $content, $matches)) {
+        if (
+            preg_match_all(
+                '/\bsrcset\s*=\s*["\']([^"\']+)["\']/i',
+                $content,
+                $matches,
+            )
+        ) {
             foreach ($matches[1] as $srcset) {
-                foreach (preg_split('/\s*,\s*/', $srcset) ?: [] as $candidate) {
-                    $parts = preg_split('/\s+/', trim($candidate)) ?: [];
+                foreach (preg_split("/\s*,\s*/", $srcset) ?: [] as $candidate) {
+                    $parts = preg_split("/\s+/", trim($candidate)) ?: [];
                     if (!empty($parts[0])) {
                         $rawReferences[] = $parts[0];
                     }
@@ -1154,7 +1427,9 @@ class ScanService extends Component
             }
         }
 
-        if (preg_match_all('/url\((["\']?)([^)"\']+)\1\)/i', $content, $matches)) {
+        if (
+            preg_match_all('/url\((["\']?)([^)"\']+)\1\)/i', $content, $matches)
+        ) {
             foreach ($matches[2] as $value) {
                 $rawReferences[] = $value;
             }
@@ -1163,7 +1438,10 @@ class ScanService extends Component
         foreach ($rawReferences as $reference) {
             $matched = false;
 
-            foreach ($this->normalizePathCandidates((string)$reference) as $candidate) {
+            foreach (
+                $this->normalizePathCandidates((string) $reference)
+                as $candidate
+            ) {
                 $assetIds = $pathLookup[$candidate] ?? null;
                 if (is_array($assetIds) && count($assetIds) === 1) {
                     $found[$assetIds[0]] = true;
@@ -1175,447 +1453,354 @@ class ScanService extends Component
                 continue;
             }
 
-            $basename = basename((string)parse_url((string)$reference, PHP_URL_PATH));
+            $basename = basename(
+                (string) parse_url((string) $reference, PHP_URL_PATH),
+            );
             $filenameKey = mb_strtolower(trim($basename));
-            if ($filenameKey !== '' && isset($filenameLookup[$filenameKey]) && count($filenameLookup[$filenameKey]) === 1) {
+            if (
+                $filenameKey !== "" &&
+                isset($filenameLookup[$filenameKey]) &&
+                count($filenameLookup[$filenameKey]) === 1
+            ) {
                 $found[$filenameLookup[$filenameKey][0]] = true;
             }
         }
 
-        if (preg_match_all('/\b([A-Za-z0-9][A-Za-z0-9._-]*\.(?:jpe?g|png|gif|svg|pdf|webp|mp4|mp3|mov|docx?|xlsx?|pptx?|txt|zip))\b/i', $content, $matches)) {
+        if (
+            preg_match_all(
+                "/\b([A-Za-z0-9][A-Za-z0-9._-]*\.(?:jpe?g|png|gif|svg|pdf|webp|mp4|mp3|mov|docx?|xlsx?|pptx?|txt|zip))\b/i",
+                $content,
+                $matches,
+            )
+        ) {
             foreach ($matches[1] as $filename) {
                 $key = mb_strtolower($filename);
-                if (isset($filenameLookup[$key]) && count($filenameLookup[$key]) === 1) {
+                if (
+                    isset($filenameLookup[$key]) &&
+                    count($filenameLookup[$key]) === 1
+                ) {
                     $found[$filenameLookup[$key][0]] = true;
                 }
             }
         }
 
-        return array_map('intval', array_keys($found));
+        return array_map("intval", array_keys($found));
     }
 
     /**
+     * Normalize path candidates for URL/path matching.
+     *
      * @param string $path
      * @return array<int,string>
      */
     private function normalizePathCandidates(string $path): array
     {
-        $path = html_entity_decode(trim($path), ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        if ($path === '') {
+        $path = html_entity_decode(
+            trim($path),
+            ENT_QUOTES | ENT_HTML5,
+            "UTF-8",
+        );
+        if ($path === "") {
             return [];
         }
 
         $parsedPath = parse_url($path, PHP_URL_PATH);
-        $path = is_string($parsedPath) && $parsedPath !== '' ? $parsedPath : $path;
+        $path =
+            is_string($parsedPath) && $parsedPath !== "" ? $parsedPath : $path;
         $path = rawurldecode($path);
-        $path = preg_replace('~/{2,}~', '/', $path) ?? $path;
+        $path = preg_replace("~/{2,}~", "/", $path) ?? $path;
         $path = trim($path);
 
-        if ($path === '' || $path === '.' || $path === '..') {
+        if ($path === "" || $path === "." || $path === "..") {
             return [];
         }
 
         $variants = [];
-        $trimmed = trim($path, '/');
-        if ($trimmed !== '') {
+        $trimmed = trim($path, "/");
+        if ($trimmed !== "") {
             $variants[] = $trimmed;
-            $variants[] = '/' . $trimmed;
+            $variants[] = "/" . $trimmed;
         }
 
-        if (str_starts_with($path, '/')) {
+        if (str_starts_with($path, "/")) {
             $variants[] = $path;
-            $variants[] = ltrim($path, '/');
+            $variants[] = ltrim($path, "/");
         } else {
             $variants[] = $path;
-            $variants[] = '/' . $path;
+            $variants[] = "/" . $path;
         }
 
-        $variants = array_values(array_unique(array_filter($variants, static fn($value) => $value !== '')));
-
-        return $variants;
+        return array_values(
+            array_unique(
+                array_filter($variants, static fn($value) => $value !== ""),
+            ),
+        );
     }
 
     /**
-     * @param string $scanId
-     * @return array<int>
+     * @param array<int> $assetIds
+     * @param array<int,bool> $usedIds
+     * @param bool $includeDrafts
+     * @param bool $includeRevisions
+     * @param bool $countAllRelationsAsUsage
+     * @param int|null $initiatingUserId
+     * @return void
      */
-    private function readMergedUsedIds(string $scanId): array
-    {
-        $used = [];
-
-        foreach ([$this->getUsedRelationsPath($scanId), $this->getUsedContentPath($scanId)] as $path) {
-            if (!is_file($path)) {
-                continue;
-            }
-
-            foreach ($this->iterateTextLines($path) as $line) {
-                $id = (int)trim($line);
-                if ($id > 0) {
-                    $used[$id] = true;
-                }
-            }
+    private function collectRelationChunk(
+        array $assetIds,
+        array &$usedIds,
+        bool $includeDrafts,
+        bool $includeRevisions,
+        bool $countAllRelationsAsUsage,
+        ?int $initiatingUserId = null,
+    ): void {
+        if (empty($assetIds)) {
+            return;
         }
 
-        $ids = array_map('intval', array_keys($used));
-        sort($ids, SORT_NUMERIC);
+        if ($countAllRelationsAsUsage) {
+            $relationIds = (new Query())
+                ->select(["targetId"])
+                ->distinct()
+                ->from(Table::RELATIONS)
+                ->where(["targetId" => $assetIds])
+                ->column();
+        } else {
+            $relationIds = Plugin::getInstance()->assetUsage->getResolvedRelationUsageIds(
+                $assetIds,
+                $includeDrafts,
+                $includeRevisions,
+                $initiatingUserId,
+            );
+        }
 
-        return $ids;
+        foreach ($relationIds as $relationId) {
+            $usedIds[(int) $relationId] = true;
+        }
     }
 
     /**
-     * @param string $scanId
-     * @param array<int> $unusedIds
+     * Count the entries that should participate in content scanning without
+     * materializing them all at once.
+     *
+     * @param array<int> $relevantTypeIds
+     * @param bool $includeDrafts
+     * @param bool $includeRevisions
+     * @param int|null $initiatingUserId
      * @return int
-     * @throws Exception
      */
-    private function writeUnusedResults(string $scanId, array $unusedIds): int
-    {
-        $path = $this->getUnusedResultsPath($scanId);
-        $count = 0;
+    private function getContentScanEntryTotal(
+        array $relevantTypeIds,
+        bool $includeDrafts,
+        bool $includeRevisions,
+        ?int $initiatingUserId = null,
+    ): int {
+        $total = 0;
 
-        if (empty($unusedIds)) {
-            $this->writeNdjsonFile($path, []);
-            return 0;
+        foreach (
+            $this->getContentScanEntryQueries(
+                $relevantTypeIds,
+                $includeDrafts,
+                $includeRevisions,
+                $initiatingUserId,
+            )
+            as $query
+        ) {
+            $total += (int) $query->count();
         }
 
-        $fh = fopen($path, 'wb');
-        if ($fh === false) {
-            throw new Exception("Unable to open results file for scan '{$scanId}'.");
-        }
-
-        try {
-            foreach (array_chunk($unusedIds, self::DEFAULT_RESULT_QUERY_CHUNK_SIZE) as $idChunk) {
-                $assets = Asset::find()
-                    ->id($idChunk)
-                    ->status(null)
-                    ->all();
-
-                foreach ($assets as $asset) {
-                    /** @var Asset $asset */
-                    $row = $this->buildUnusedAssetRow($asset);
-                    fwrite($fh, Json::encode($row) . PHP_EOL);
-                    $count++;
-                }
-            }
-        } finally {
-            fclose($fh);
-        }
-
-        return $count;
+        return $total;
     }
 
     /**
+     * Iterate entries that should participate in content scanning in batches.
+     *
+     * When draft usage is enabled, this includes canonical entries, saved drafts,
+     * and provisional drafts created by the user who started the scan. When
+     * revision usage is enabled, this also includes revisions.
+     *
+     * @param array<int> $relevantTypeIds
+     * @param int $batchSize
+     * @param bool $includeDrafts
+     * @param bool $includeRevisions
+     * @param int|null $initiatingUserId
+     * @return iterable<Entry>
+     */
+    private function iterateEntriesForContentScan(
+        array $relevantTypeIds,
+        int $batchSize,
+        bool $includeDrafts,
+        bool $includeRevisions,
+        ?int $initiatingUserId = null,
+    ): iterable {
+        if (empty($relevantTypeIds)) {
+            return;
+        }
+
+        $seenEntryIds = [];
+        $batchSize = max(1, $batchSize);
+
+        foreach (
+            $this->getContentScanEntryQueries(
+                $relevantTypeIds,
+                $includeDrafts,
+                $includeRevisions,
+                $initiatingUserId,
+            )
+            as $query
+        ) {
+            foreach ($query->batch($batchSize) as $entryBatch) {
+                foreach ($entryBatch as $entry) {
+                    if (!$entry instanceof Entry) {
+                        continue;
+                    }
+
+                    $entryId = (int) ($entry->id ?? 0);
+                    if ($entryId <= 0 || isset($seenEntryIds[$entryId])) {
+                        continue;
+                    }
+
+                    $seenEntryIds[$entryId] = true;
+                    yield $entry;
+                }
+            }
+        }
+    }
+
+    /**
+     * Build the element queries used for batched content scanning.
+     *
+     * @param array<int> $relevantTypeIds
+     * @param bool $includeDrafts
+     * @param bool $includeRevisions
+     * @param int|null $initiatingUserId
+     * @return array<int, \craft\elements\db\EntryQuery>
+     */
+    private function getContentScanEntryQueries(
+        array $relevantTypeIds,
+        bool $includeDrafts,
+        bool $includeRevisions,
+        ?int $initiatingUserId = null,
+    ): array {
+        if (empty($relevantTypeIds)) {
+            return [];
+        }
+
+        $queries = [
+            Entry::find()
+                ->typeId($relevantTypeIds)
+                ->status(null)
+                ->orderBy(["elements.id" => SORT_ASC]),
+        ];
+
+        if ($includeDrafts) {
+            $queries[] = Entry::find()
+                ->typeId($relevantTypeIds)
+                ->drafts()
+                ->savedDraftsOnly()
+                ->orderBy(["elements.id" => SORT_ASC]);
+
+            if ($initiatingUserId !== null && $initiatingUserId > 0) {
+                $queries[] = Entry::find()
+                    ->typeId($relevantTypeIds)
+                    ->provisionalDrafts()
+                    ->draftCreator($initiatingUserId)
+                    ->orderBy(["elements.id" => SORT_ASC]);
+            }
+        }
+
+        if ($includeRevisions) {
+            $queries[] = Entry::find()
+                ->typeId($relevantTypeIds)
+                ->revisions()
+                ->orderBy(["elements.id" => SORT_ASC]);
+        }
+
+        return $queries;
+    }
+
+    /**
+     * Build final unused asset result rows for one asset ID chunk.
+     *
+     * @param array<int> $unusedIds
+     * @return array<int,array<string,mixed>>
+     */
+    private function buildUnusedAssetRows(array $unusedIds): array
+    {
+        if (empty($unusedIds)) {
+            return [];
+        }
+
+        $assets = Asset::find()->id($unusedIds)->status(null)->all();
+
+        $rows = [];
+        foreach ($assets as $asset) {
+            /** @var Asset $asset */
+            $rows[] = $this->buildUnusedAssetRow($asset);
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Build a final unused asset result row.
+     *
      * @param Asset $asset
      * @return array<string,mixed>
      */
     private function buildUnusedAssetRow(Asset $asset): array
     {
-        $path = '';
-        $folderPath = '';
+        $path = "";
+        $folderPath = "";
 
         try {
             $folder = $asset->getFolder();
             if ($folder && $folder->path) {
-                $folderPath = (string)$folder->path;
+                $folderPath = (string) $folder->path;
             }
         } catch (\Throwable) {
-            $folderPath = '';
+            $folderPath = "";
         }
 
         try {
             $volume = $asset->getVolume();
             if ($volume) {
-                if (method_exists($volume, 'getRootPath')) {
+                if (method_exists($volume, "getRootPath")) {
                     $volumePath = $volume->getRootPath();
                     if ($volumePath) {
-                        $path = (string)$volumePath;
+                        $path = (string) $volumePath;
                         if ($folderPath) {
-                            $path = rtrim($path, '/\\') . '/' . ltrim($folderPath, '/\\');
+                            $path =
+                                rtrim($path, "/\\") .
+                                "/" .
+                                ltrim($folderPath, "/\\");
                         }
                     }
                 }
 
-                if (empty($path) && !empty($volume->handle)) {
-                    $path = '@volumes/' . $volume->handle;
+                if ($path === "" && !empty($volume->handle)) {
+                    $path = "@volumes/" . $volume->handle;
                     if ($folderPath) {
-                        $path .= '/' . ltrim($folderPath, '/\\');
+                        $path .= "/" . ltrim($folderPath, "/\\");
                     }
                 }
             }
         } catch (\Throwable) {
-            $path = '';
+            $path = "";
         }
 
         return [
-            'id' => (int)$asset->id,
-            'title' => (string)$asset->title,
-            'filename' => (string)$asset->filename,
-            'url' => $asset->getUrl(),
-            'cpUrl' => $asset->getCpEditUrl(),
-            'volume' => $asset->volume->name ?? '',
-            'volumeId' => (int)$asset->volumeId,
-            'size' => (int)$asset->size,
-            'path' => (string)$path,
-            'kind' => (string)$asset->kind,
+            "id" => (int) $asset->id,
+            "title" => (string) $asset->title,
+            "filename" => (string) $asset->filename,
+            "url" => $asset->getUrl(),
+            "cpUrl" => $asset->getCpEditUrl(),
+            "volume" => $asset->volume->name ?? "",
+            "volumeId" => (int) $asset->volumeId,
+            "size" => (int) $asset->size,
+            "path" => (string) $path,
+            "kind" => (string) $asset->kind,
         ];
-    }
-
-    /**
-     * @param string $scanId
-     * @param int|null $completedAt
-     * @return void
-     */
-    private function setLastScan(string $scanId, ?int $completedAt = null): void
-    {
-        $this->writeJsonFile($this->getLastScanFilePath(), [
-            'scanId' => $scanId,
-            'completedAt' => $completedAt ?? time(),
-        ]);
-    }
-
-    /**
-     * @param string $scanId
-     * @param array $updates
-     * @return void
-     */
-    private function updateProgress(string $scanId, array $updates): void
-    {
-        $progress = $this->getProgress($scanId) ?? [];
-        $progress = array_merge($progress, $updates, [
-            'updatedAt' => time(),
-        ]);
-
-        if (!isset($progress['stage'])) {
-            $progress['stage'] = self::STAGE_SETUP;
-        }
-
-        $this->writeJsonFile($this->getProgressPath($scanId), $progress);
-        $this->touchMeta($scanId, [
-            'updatedAt' => $progress['updatedAt'],
-            'status' => $progress['status'] ?? self::STATUS_RUNNING,
-            'stage' => $progress['stage'],
-        ]);
-    }
-
-    /**
-     * @param string $scanId
-     * @param array $updates
-     * @return void
-     */
-    private function touchMeta(string $scanId, array $updates): void
-    {
-        $meta = $this->getMeta($scanId) ?? [];
-        $meta = array_merge($meta, $updates, [
-            'updatedAt' => time(),
-        ]);
-
-        $this->writeJsonFile($this->getMetaPath($scanId), $meta);
-    }
-
-    /**
-     * @param string $scanId
-     * @param array $updates
-     * @return void
-     */
-    private function touchState(string $scanId, array $updates): void
-    {
-        $state = $this->readJsonFile($this->getStatePath($scanId));
-        $state = is_array($state) ? $state : [];
-        $state = array_merge($state, $updates);
-
-        $this->writeJsonFile($this->getStatePath($scanId), $state);
-    }
-
-    /**
-     * @param string $scanId
-     * @return void
-     */
-    private function clearResults(string $scanId): void
-    {
-        FileHelper::createDirectory($this->getResultsDirectory($scanId));
-
-        foreach ([$this->getUnusedIdsPath($scanId), $this->getUnusedResultsPath($scanId)] as $path) {
-            if (is_file($path)) {
-                @unlink($path);
-            }
-        }
-    }
-
-    /**
-     * @param string $scanId
-     * @return void
-     */
-    private function writeEmptyResults(string $scanId): void
-    {
-        $this->writeLines($this->getUsedRelationsPath($scanId), []);
-        $this->writeLines($this->getUsedContentPath($scanId), []);
-        $this->writeLines($this->getUsedFinalPath($scanId), []);
-        $this->writeLines($this->getUnusedIdsPath($scanId), []);
-        $this->writeNdjsonFile($this->getUnusedResultsPath($scanId), []);
-    }
-
-    /**
-     * @param string $directory
-     * @return void
-     */
-    private function clearDirectory(string $directory): void
-    {
-        if (is_dir($directory)) {
-            FileHelper::removeDirectory($directory);
-        }
-
-        FileHelper::createDirectory($directory);
-    }
-
-    /**
-     * @param string $path
-     * @param array $payload
-     * @return void
-     */
-    private function writeJsonFile(string $path, array $payload): void
-    {
-        FileHelper::createDirectory(dirname($path));
-        $json = Json::encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-        $this->writeFileAtomically($path, $json . PHP_EOL);
-    }
-
-    /**
-     * @param string $path
-     * @return mixed
-     */
-    private function readJsonFile(string $path): mixed
-    {
-        if (!is_file($path)) {
-            return null;
-        }
-
-        $contents = file_get_contents($path);
-        if ($contents === false || trim($contents) === '') {
-            return null;
-        }
-
-        try {
-            return Json::decode($contents);
-        } catch (\Throwable) {
-            return null;
-        }
-    }
-
-    /**
-     * @param string $path
-     * @param array<int,mixed> $rows
-     * @return void
-     * @throws Exception
-     */
-    private function writeNdjsonFile(string $path, array $rows): void
-    {
-        FileHelper::createDirectory(dirname($path));
-
-        $fh = fopen($path, 'wb');
-        if ($fh === false) {
-            throw new Exception("Unable to open '{$path}' for writing.");
-        }
-
-        try {
-            foreach ($rows as $row) {
-                fwrite($fh, Json::encode($row) . PHP_EOL);
-            }
-        } finally {
-            fclose($fh);
-        }
-    }
-
-    /**
-     * @param string $path
-     * @param array<int,string|int> $lines
-     * @return void
-     */
-    private function writeLines(string $path, array $lines): void
-    {
-        FileHelper::createDirectory(dirname($path));
-        $content = '';
-        foreach ($lines as $line) {
-            $content .= trim((string)$line) . PHP_EOL;
-        }
-        $this->writeFileAtomically($path, $content);
-    }
-
-    /**
-     * @param string $path
-     * @param string $contents
-     * @return void
-     */
-    private function writeFileAtomically(string $path, string $contents): void
-    {
-        FileHelper::createDirectory(dirname($path));
-
-        $tmpPath = $path . '.tmp-' . bin2hex(random_bytes(6));
-        file_put_contents($tmpPath, $contents, LOCK_EX);
-        rename($tmpPath, $path);
-    }
-
-    /**
-     * @param string $path
-     * @return \Generator<int,array>
-     */
-    private function iterateNdjsonFile(string $path): \Generator
-    {
-        if (!is_file($path)) {
-            return;
-        }
-
-        $fh = fopen($path, 'rb');
-        if ($fh === false) {
-            return;
-        }
-
-        try {
-            while (($line = fgets($fh)) !== false) {
-                $line = trim($line);
-                if ($line === '') {
-                    continue;
-                }
-
-                try {
-                    $row = Json::decode($line);
-                } catch (\Throwable) {
-                    continue;
-                }
-
-                if (is_array($row)) {
-                    yield $row;
-                }
-            }
-        } finally {
-            fclose($fh);
-        }
-    }
-
-    /**
-     * @param string $path
-     * @return \Generator<int,string>
-     */
-    private function iterateTextLines(string $path): \Generator
-    {
-        if (!is_file($path)) {
-            return;
-        }
-
-        $fh = fopen($path, 'rb');
-        if ($fh === false) {
-            return;
-        }
-
-        try {
-            while (($line = fgets($fh)) !== false) {
-                $line = trim($line);
-                if ($line !== '') {
-                    yield $line;
-                }
-            }
-        } finally {
-            fclose($fh);
-        }
     }
 
     /**
@@ -1627,6 +1812,7 @@ class ScanService extends Component
     private function scaleProgress(float $ratio, int $start, int $end): int
     {
         $ratio = max(0.0, min(1.0, $ratio));
-        return (int)round($start + (($end - $start) * $ratio));
+
+        return (int) round($start + ($end - $start) * $ratio);
     }
 }

@@ -83,4 +83,22 @@ return [
     // Scan Time
     'Scanned on {date}' => 'Naskenováno {date}',
     'Restoring last scan...' => 'Obnovování posledního skenu...',
+    // Usage Dialog / Scan Options
+    'Check Asset Usage' => 'Zkontrolovat použití assetu',
+    'Choose how usage should be evaluated for this asset.' => 'Vyberte, jak má být použití tohoto assetu vyhodnoceno.',
+    'Choose the usage options you want to check, then confirm.' => 'Vyberte možnosti použití, které chcete zkontrolovat, a poté potvrďte.',
+    'Include drafts' => 'Zahrnout koncepty',
+    'Include revisions' => 'Zahrnout revize',
+    'Count all relational references as usage' => 'Počítat všechny relační odkazy jako použití',
+    'Recommended for projects with plugin-defined or unknown element types that may store asset relations outside normal entry content.' => 'Doporučeno pro projekty s pluginem definovanými nebo neznámými typy prvků, které mohou ukládat vazby na assety mimo běžný obsah záznamů.',
+    'Check Usage' => 'Zkontrolovat použití',
+    'Used by Relational Elements' => 'Používáno relačními prvky',
+    'Other Relational Elements' => 'Další relační prvky',
+    'Relational element #{id}' => 'Relační prvek č. {id}',
+    'Relational element' => 'Relační prvek',
+    'Include drafts in this scan' => 'Zahrnout do tohoto skenování koncepty',
+    'When enabled, assets referenced only in drafts may be treated as used.' => 'Je-li zapnuto, assety odkazované pouze v konceptech mohou být považovány za používané.',
+    'Include revisions in this scan' => 'Zahrnout do tohoto skenování revize',
+    'When enabled, assets referenced only in revisions may be treated as used.' => 'Je-li zapnuto, assety odkazované pouze v revizích mohou být považovány za používané.',
+    'When enabled, any row in Craft’s relations table will cause an asset to be treated as used, including references created by plugin-defined or unknown element types. Disable this for a stricter scan.' => 'Je-li tato možnost zapnuta, jakýkoli řádek v tabulce relací Craftu způsobí, že asset bude považován za používaný, včetně odkazů vytvořených pluginem definovanými nebo neznámými typy prvků. Pro přísnější skenování tuto možnost vypněte.',
 ];

@@ -29,7 +29,16 @@ class ScanContentJob extends BaseJob
     {
         try {
             $scanService = Plugin::getInstance()->scanService;
+
+            if (!$scanService->scanExists($this->scanId)) {
+                return;
+            }
+
             $scanService->collectContentUsage($this->scanId);
+
+            if (!$scanService->scanExists($this->scanId)) {
+                return;
+            }
 
             Craft::$app->getQueue()->push(new ScanFinalizeJob([
                 'scanId' => $this->scanId,

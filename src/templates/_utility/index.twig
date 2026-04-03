@@ -3,7 +3,7 @@
 <div class="asset-cleaner-utility">
     <div class="asset-cleaner-form">
         <h2>{{ 'Select Volumes'|t('asset-cleaner') }}</h2>
-        
+
         <div class="volume-checkboxes">
             {% for volume in volumes %}
                 <div class="checkbox-wrapper">
@@ -17,6 +17,30 @@
                 </div>
             {% endfor %}
         </div>
+
+        {{ forms.checkboxField({
+            label: 'Include drafts in this scan'|t('asset-cleaner'),
+            instructions: 'When enabled, assets referenced only in drafts may be treated as used.'|t('asset-cleaner'),
+            name: 'includeDrafts',
+            value: 1,
+            checked: includeDraftsDefault ?? false,
+        }) }}
+
+        {{ forms.checkboxField({
+            label: 'Include revisions in this scan'|t('asset-cleaner'),
+            instructions: 'When enabled, assets referenced only in revisions may be treated as used.'|t('asset-cleaner'),
+            name: 'includeRevisions',
+            value: 1,
+            checked: includeRevisionsDefault ?? false,
+        }) }}
+
+        {{ forms.checkboxField({
+            label: 'Count all relational references as usage'|t('asset-cleaner'),
+            instructions: 'When enabled, any row in Craft’s relations table will cause an asset to be treated as used, including references created by plugin-defined or unknown element types. Disable this for a stricter scan.'|t('asset-cleaner'),
+            name: 'countAllRelationsAsUsage',
+            value: 1,
+            checked: true,
+        }) }}
 
         <div class="buttons">
             <button type="button" class="btn submit asset-cleaner-scan-btn">
@@ -70,7 +94,7 @@
 
         <div class="asset-cleaner-actions" style="display: none;">
             <h3>{{ 'Bulk Actions - All Selected Volumes'|t('asset-cleaner') }}</h3>
-            
+
             <div class="buttons">
                 <button type="button" class="btn asset-cleaner-csv-btn">
                     {{ 'Download CSV'|t('asset-cleaner') }}

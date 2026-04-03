@@ -81,6 +81,25 @@ return [
     'The queue does not appear to be running. Make sure a queue worker is active (e.g. php craft queue/listen).' => 'Kolejka nie wydaje się być uruchomiona. Upewnij się, że worker kolejki jest aktywny (np. php craft queue/listen).',
 
     // Scan Time
-    'Scanned on {date}' => 'Przeskanowano {date}',
-    'Restoring last scan...' => 'Przywracanie ostatniego skanu...',
+    'Scanned on {date}' => 'Zeskanowano dnia {date}',
+    'Restoring last scan...' => 'Przywracanie ostatniego skanowania...',
+
+    // Usage Dialog / Scan Options
+    'Check Asset Usage' => 'Sprawdź użycie zasobu',
+    'Choose how usage should be evaluated for this asset.' => 'Wybierz, jak powinno być oceniane użycie tego zasobu.',
+    'Choose the usage options you want to check, then confirm.' => 'Wybierz opcje użycia, które chcesz sprawdzić, a następnie potwierdź.',
+    'Include drafts' => 'Uwzględnij szkice',
+    'Include revisions' => 'Uwzględnij rewizje',
+    'Count all relational references as usage' => 'Traktuj wszystkie powiązania relacyjne jako użycie',
+    'Recommended for projects with plugin-defined or unknown element types that may store asset relations outside normal entry content.' => 'Zalecane dla projektów z typami elementów zdefiniowanymi przez wtyczki lub nieznanymi, które mogą przechowywać powiązania zasobów poza zwykłą treścią wpisów.',
+    'Check Usage' => 'Sprawdź użycie',
+    'Used by Relational Elements' => 'Używane przez elementy relacyjne',
+    'Other Relational Elements' => 'Inne elementy relacyjne',
+    'Relational element #{id}' => 'Element relacyjny #{id}',
+    'Relational element' => 'Element relacyjny',
+    'Include drafts in this scan' => 'Uwzględnij szkice w tym skanowaniu',
+    'When enabled, assets referenced only in drafts may be treated as used.' => 'Po włączeniu zasoby, do których odwołują się wyłącznie szkice, mogą być traktowane jako używane.',
+    'Include revisions in this scan' => 'Uwzględnij rewizje w tym skanowaniu',
+    'When enabled, assets referenced only in revisions may be treated as used.' => 'Po włączeniu zasoby, do których odwołują się wyłącznie rewizje, mogą być traktowane jako używane.',
+    'When enabled, any row in Craft’s relations table will cause an asset to be treated as used, including references created by plugin-defined or unknown element types. Disable this for a stricter scan.' => 'Po włączeniu każdy wiersz w tabeli relacji Craft sprawi, że zasób będzie traktowany jako używany, w tym odwołania utworzone przez typy elementów zdefiniowane przez wtyczki lub nieznane. Wyłącz tę opcję, aby skanowanie było bardziej rygorystyczne.',
 ];

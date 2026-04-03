@@ -93,4 +93,23 @@ return [
     // Scan Time
     'Scanned on {date}' => 'Gescannt am {date}',
     'Restoring last scan...' => 'Letzten Scan wiederherstellen...',
+
+    // Usage Dialog / Scan Options
+    'Check Asset Usage' => 'Asset-Nutzung prüfen',
+    'Choose how usage should be evaluated for this asset.' => 'Wählen Sie, wie die Nutzung für dieses Asset bewertet werden soll.',
+    'Choose the usage options you want to check, then confirm.' => 'Wählen Sie die Nutzungsoptionen, die Sie prüfen möchten, und bestätigen Sie dann.',
+    'Include drafts' => 'Entwürfe einbeziehen',
+    'Include revisions' => 'Revisionen einbeziehen',
+    'Count all relational references as usage' => 'Alle relationalen Verweise als Nutzung zählen',
+    'Recommended for projects with plugin-defined or unknown element types that may store asset relations outside normal entry content.' => 'Empfohlen für Projekte mit plugin-definierten oder unbekannten Elementtypen, die Asset-Beziehungen außerhalb normaler Inhaltseinträge speichern könnten.',
+    'Check Usage' => 'Nutzung prüfen',
+    'Used by Relational Elements' => 'Verwendet durch relationale Elemente',
+    'Other Relational Elements' => 'Andere relationale Elemente',
+    'Relational element #{id}' => 'Relationales Element #{id}',
+    'Relational element' => 'Relationales Element',
+    'Include drafts in this scan' => 'Entwürfe in diesem Scan einbeziehen',
+    'When enabled, assets referenced only in drafts may be treated as used.' => 'Wenn aktiviert, können Assets, auf die nur in Entwürfen verwiesen wird, als verwendet behandelt werden.',
+    'Include revisions in this scan' => 'Revisionen in diesem Scan einbeziehen',
+    'When enabled, assets referenced only in revisions may be treated as used.' => 'Wenn aktiviert, können Assets, auf die nur in Revisionen verwiesen wird, als verwendet behandelt werden.',
+    'When enabled, any row in Craft’s relations table will cause an asset to be treated as used, including references created by plugin-defined or unknown element types. Disable this for a stricter scan.' => 'Wenn aktiviert, führt jede Zeile in Crafts Relationstabelle dazu, dass ein Asset als verwendet behandelt wird, einschließlich Verweisen, die von plugin-definierten oder unbekannten Elementtypen erstellt wurden. Deaktivieren Sie dies für einen strengeren Scan.',
 ];

@@ -108,6 +108,198 @@
     font-size: 12px;
 }
 
+/* Usage Dialog */
+#asset-cleaner-usage-dialog {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    background: rgba(0, 0, 0, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+
+#asset-cleaner-usage-dialog .asset-cleaner-usage-dialog-content {
+    background: var(--white);
+    border-radius: var(--large-border-radius);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+    width: 100%;
+    max-width: 520px;
+    max-height: calc(100vh - 48px);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+#asset-cleaner-usage-dialog .asset-cleaner-usage-dialog-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 24px 24px 0;
+}
+
+#asset-cleaner-usage-dialog .asset-cleaner-usage-dialog-header h2 {
+    margin: 0;
+}
+
+#asset-cleaner-usage-dialog .asset-cleaner-usage-dialog-close {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--gray-500);
+    cursor: pointer;
+    font-size: 24px;
+    line-height: 1;
+    padding: 0;
+}
+
+#asset-cleaner-usage-dialog .asset-cleaner-usage-dialog-close:hover {
+    color: var(--gray-700);
+}
+
+#asset-cleaner-usage-dialog .asset-cleaner-usage-dialog-body {
+    padding: 20px 24px 24px;
+    overflow-y: auto;
+}
+
+#asset-cleaner-usage-dialog .asset-cleaner-usage-dialog-intro {
+    color: var(--gray-600);
+    margin: 0 0 16px;
+}
+
+#asset-cleaner-usage-dialog .asset-cleaner-usage-options {
+    display: grid;
+    gap: 14px;
+    margin-bottom: 20px;
+}
+
+#asset-cleaner-usage-dialog .asset-cleaner-usage-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+#asset-cleaner-usage-dialog .asset-cleaner-usage-results {
+    border-top: 1px solid var(--gray-200);
+    margin-top: 20px;
+    padding-top: 20px;
+}
+
+#asset-cleaner-usage-dialog .asset-cleaner-usage-results .not-used {
+    color: var(--gray-500);
+    font-style: italic;
+    margin: 0;
+}
+
+#asset-cleaner-usage-dialog .asset-cleaner-usage-results .error {
+    color: var(--error-color);
+    margin: 0;
+}
+
+#asset-cleaner-usage-dialog .asset-cleaner-usage-results .usage-section {
+    margin-bottom: 16px;
+}
+
+#asset-cleaner-usage-dialog
+    .asset-cleaner-usage-results
+    .usage-section:last-child {
+    margin-bottom: 0;
+}
+
+#asset-cleaner-usage-dialog .asset-cleaner-usage-results h4 {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--gray-500);
+    margin: 0 0 8px;
+}
+
+#asset-cleaner-usage-dialog .asset-cleaner-usage-results .usage-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+#asset-cleaner-usage-dialog .asset-cleaner-usage-results .usage-list li {
+    margin-bottom: 8px;
+}
+
+#asset-cleaner-usage-dialog
+    .asset-cleaner-usage-results
+    .usage-list
+    li:last-child {
+    margin-bottom: 0;
+}
+
+#asset-cleaner-usage-dialog .asset-cleaner-usage-results .usage-list a {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--link-color);
+    text-decoration: none;
+}
+
+#asset-cleaner-usage-dialog
+    .asset-cleaner-usage-results
+    .usage-list
+    .usage-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--gray-600);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+#asset-cleaner-usage-dialog .asset-cleaner-usage-results .usage-list a:hover {
+    text-decoration: underline;
+}
+
+#asset-cleaner-usage-dialog .asset-cleaner-usage-results .usage-list .status {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+#asset-cleaner-usage-dialog
+    .asset-cleaner-usage-results
+    .usage-list
+    .status.live {
+    background: var(--enabled-color);
+}
+
+#asset-cleaner-usage-dialog
+    .asset-cleaner-usage-results
+    .usage-list
+    .status.pending {
+    background: var(--pending-color);
+}
+
+#asset-cleaner-usage-dialog
+    .asset-cleaner-usage-results
+    .usage-list
+    .status.disabled {
+    background: var(--disabled-color);
+}
+
+#asset-cleaner-usage-dialog
+    .asset-cleaner-usage-results
+    .usage-list
+    .status.expired {
+    background: var(--expired-color);
+}
+
+#asset-cleaner-usage-dialog .asset-cleaner-usage-results .section-name,
+#asset-cleaner-usage-dialog .asset-cleaner-usage-results .field-name,
+#asset-cleaner-usage-dialog .asset-cleaner-usage-results .relation-type {
+    color: var(--gray-500);
+    font-size: 12px;
+}
+
 /* Utility Page */
 .asset-cleaner-utility {
     max-width: 100%;

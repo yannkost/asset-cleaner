@@ -83,4 +83,23 @@ return [
     // Scan Time
     'Scanned on {date}' => 'Escaneado em {date}',
     'Restoring last scan...' => 'Restaurando último scan...',
+
+    // Usage Dialog / Scan Options
+    'Check Asset Usage' => 'Verificar uso do recurso',
+    'Choose how usage should be evaluated for this asset.' => 'Escolha como o uso deve ser avaliado para este recurso.',
+    'Choose the usage options you want to check, then confirm.' => 'Escolha as opções de uso que deseja verificar e depois confirme.',
+    'Include drafts' => 'Incluir rascunhos',
+    'Include revisions' => 'Incluir revisões',
+    'Count all relational references as usage' => 'Contar todas as referências relacionais como uso',
+    'Recommended for projects with plugin-defined or unknown element types that may store asset relations outside normal entry content.' => 'Recomendado para projetos com tipos de elementos definidos por plugins ou desconhecidos que possam armazenar relações de recursos fora do conteúdo normal das entradas.',
+    'Check Usage' => 'Verificar uso',
+    'Used by Relational Elements' => 'Usado por elementos relacionais',
+    'Other Relational Elements' => 'Outros elementos relacionais',
+    'Relational element #{id}' => 'Elemento relacional #{id}',
+    'Relational element' => 'Elemento relacional',
+    'Include drafts in this scan' => 'Incluir rascunhos nesta verificação',
+    'When enabled, assets referenced only in drafts may be treated as used.' => 'Quando ativado, recursos referenciados apenas em rascunhos podem ser tratados como usados.',
+    'Include revisions in this scan' => 'Incluir revisões nesta verificação',
+    'When enabled, assets referenced only in revisions may be treated as used.' => 'Quando ativado, recursos referenciados apenas em revisões podem ser tratados como usados.',
+    'When enabled, any row in Craft’s relations table will cause an asset to be treated as used, including references created by plugin-defined or unknown element types. Disable this for a stricter scan.' => 'Quando ativado, qualquer linha na tabela de relações do Craft fará com que um recurso seja tratado como usado, incluindo referências criadas por tipos de elementos definidos por plugins ou desconhecidos. Desative isso para uma verificação mais rigorosa.',
 ];

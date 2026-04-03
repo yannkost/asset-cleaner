@@ -83,4 +83,22 @@ return [
     // Scan Time
     'Scanned on {date}' => 'Scanat pe {date}',
     'Restoring last scan...' => 'Restaurarea ultimei scanări...',
+    // Usage Dialog / Scan Options
+    'Check Asset Usage' => 'Verifică utilizarea resursei',
+    'Choose how usage should be evaluated for this asset.' => 'Alege cum ar trebui evaluată utilizarea acestei resurse.',
+    'Choose the usage options you want to check, then confirm.' => 'Alege opțiunile de utilizare pe care vrei să le verifici, apoi confirmă.',
+    'Include drafts' => 'Include ciornele',
+    'Include revisions' => 'Include reviziile',
+    'Count all relational references as usage' => 'Consideră toate referințele relaționale ca utilizare',
+    'Recommended for projects with plugin-defined or unknown element types that may store asset relations outside normal entry content.' => 'Recomandat pentru proiecte cu tipuri de elemente definite de pluginuri sau necunoscute, care pot stoca relații ale resurselor în afara conținutului normal al intrărilor.',
+    'Check Usage' => 'Verifică utilizarea',
+    'Used by Relational Elements' => 'Folosit de elemente relaționale',
+    'Other Relational Elements' => 'Alte elemente relaționale',
+    'Relational element #{id}' => 'Element relațional #{id}',
+    'Relational element' => 'Element relațional',
+    'Include drafts in this scan' => 'Include ciornele în această scanare',
+    'When enabled, assets referenced only in drafts may be treated as used.' => 'Când este activat, resursele la care se face referire doar în ciorne pot fi tratate ca folosite.',
+    'Include revisions in this scan' => 'Include reviziile în această scanare',
+    'When enabled, assets referenced only in revisions may be treated as used.' => 'Când este activat, resursele la care se face referire doar în revizii pot fi tratate ca folosite.',
+    'When enabled, any row in Craft’s relations table will cause an asset to be treated as used, including references created by plugin-defined or unknown element types. Disable this for a stricter scan.' => 'Când este activat, orice rând din tabelul de relații al Craft va face ca o resursă să fie tratată ca folosită, inclusiv referințele create de tipuri de elemente definite de pluginuri sau necunoscute. Dezactivează această opțiune pentru o scanare mai strictă.',
 ];

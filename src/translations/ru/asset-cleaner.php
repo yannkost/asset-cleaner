@@ -83,4 +83,22 @@ return [
     // Scan Time
     'Scanned on {date}' => 'Сканирование выполнено {date}',
     'Restoring last scan...' => 'Восстановление последнего сканирования...',
+    // Usage Dialog / Scan Options
+    'Check Asset Usage' => 'Проверить использование ассета',
+    'Choose how usage should be evaluated for this asset.' => 'Выберите, как следует оценивать использование этого ассета.',
+    'Choose the usage options you want to check, then confirm.' => 'Выберите параметры использования, которые нужно проверить, затем подтвердите.',
+    'Include drafts' => 'Включить черновики',
+    'Include revisions' => 'Включить ревизии',
+    'Count all relational references as usage' => 'Считать все реляционные ссылки использованием',
+    'Recommended for projects with plugin-defined or unknown element types that may store asset relations outside normal entry content.' => 'Рекомендуется для проектов с определёнными плагинами или неизвестными типами элементов, которые могут хранить связи ассетов вне обычного содержимого записей.',
+    'Check Usage' => 'Проверить использование',
+    'Used by Relational Elements' => 'Используется реляционными элементами',
+    'Other Relational Elements' => 'Другие реляционные элементы',
+    'Relational element #{id}' => 'Реляционный элемент #{id}',
+    'Relational element' => 'Реляционный элемент',
+    'Include drafts in this scan' => 'Включить черновики в это сканирование',
+    'When enabled, assets referenced only in drafts may be treated as used.' => 'Если включено, ассеты, на которые есть ссылки только в черновиках, могут считаться используемыми.',
+    'Include revisions in this scan' => 'Включить ревизии в это сканирование',
+    'When enabled, assets referenced only in revisions may be treated as used.' => 'Если включено, ассеты, на которые есть ссылки только в ревизиях, могут считаться используемыми.',
+    'When enabled, any row in Craft’s relations table will cause an asset to be treated as used, including references created by plugin-defined or unknown element types. Disable this for a stricter scan.' => 'Если включено, любая строка в таблице relations Craft приведёт к тому, что ассет будет считаться используемым, включая ссылки, созданные определёнными плагинами или неизвестными типами элементов. Отключите это для более строгого сканирования.',
 ];

@@ -83,4 +83,23 @@ return [
     // Scan Time
     'Scanned on {date}' => 'تم المسح في {date}',
     'Restoring last scan...' => 'استعادة آخر مسح...',
+
+    // Usage Dialog / Scan Options
+    'Check Asset Usage' => 'التحقق من استخدام الأصل',
+    'Choose how usage should be evaluated for this asset.' => 'اختر كيفية تقييم استخدام هذا الأصل.',
+    'Choose the usage options you want to check, then confirm.' => 'اختر خيارات الاستخدام التي تريد التحقق منها ثم أكّد.',
+    'Include drafts' => 'تضمين المسودات',
+    'Include revisions' => 'تضمين المراجعات',
+    'Count all relational references as usage' => 'احتساب جميع المراجع العلائقية على أنها استخدام',
+    'Recommended for projects with plugin-defined or unknown element types that may store asset relations outside normal entry content.' => 'يُنصح بهذا للمشاريع التي تحتوي على أنواع عناصر معرّفة عبر إضافات أو غير معروفة وقد تخزن علاقات الأصول خارج محتوى الإدخالات العادي.',
+    'Check Usage' => 'التحقق من الاستخدام',
+    'Used by Relational Elements' => 'مستخدم بواسطة عناصر علائقية',
+    'Other Relational Elements' => 'عناصر علائقية أخرى',
+    'Relational element #{id}' => 'عنصر علائقي رقم #{id}',
+    'Relational element' => 'عنصر علائقي',
+    'Include drafts in this scan' => 'تضمين المسودات في هذا الفحص',
+    'When enabled, assets referenced only in drafts may be treated as used.' => 'عند التفعيل، قد تُعتبر الأصول المشار إليها فقط في المسودات مستخدمة.',
+    'Include revisions in this scan' => 'تضمين المراجعات في هذا الفحص',
+    'When enabled, assets referenced only in revisions may be treated as used.' => 'عند التفعيل، قد تُعتبر الأصول المشار إليها فقط في المراجعات مستخدمة.',
+    'When enabled, any row in Craft’s relations table will cause an asset to be treated as used, including references created by plugin-defined or unknown element types. Disable this for a stricter scan.' => 'عند التفعيل، سيؤدي أي صف في جدول العلاقات في Craft إلى اعتبار الأصل مستخدمًا، بما في ذلك المراجع التي تنشئها أنواع عناصر معرّفة عبر إضافات أو غير معروفة. عطّل هذا الخيار للحصول على فحص أكثر صرامة.',
 ];

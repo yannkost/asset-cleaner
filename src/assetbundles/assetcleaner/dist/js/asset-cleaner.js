@@ -3,12 +3,14 @@
 
     const settings = window.AssetCleanerSettings || { translations: {} };
     const t = settings.translations;
+    const usageDefaults = settings.usageDefaults || {};
 
     // State
     let selectedAssetIds = [];
     let unusedAssets = [];
     let activeScanId = settings.lastScanId || null;
     let tooltipTimer = null;
+    let hasWarnedPollFailure = false;
 
     // Initialize when DOM is ready
     if (document.readyState === "loading") {
@@ -35,57 +37,167 @@
             const assetId = btn.dataset.assetId;
             if (!assetId) return;
 
-            showUsagePopover(btn, assetId);
+            showUsageDialog(assetId);
         });
     }
 
-    function showUsagePopover(btn, assetId) {
-        // Remove existing popover
-        const existing = document.querySelector(".asset-cleaner-popover");
-        if (existing) {
-            existing.remove();
-        }
+    function showUsageDialog(assetId) {
+        closeUsageDialog();
 
-        // Create popover
-        const popover = document.createElement("div");
-        popover.className = "asset-cleaner-popover";
-        popover.innerHTML =
+        const dialog = document.createElement("div");
+        dialog.id = "asset-cleaner-usage-dialog";
+        dialog.style.position = "fixed";
+        dialog.style.inset = "0";
+        dialog.style.background = "rgba(0, 0, 0, 0.45)";
+        dialog.style.zIndex = "2000";
+        dialog.style.display = "flex";
+        dialog.style.alignItems = "center";
+        dialog.style.justifyContent = "center";
+        dialog.style.padding = "24px";
+
+        dialog.innerHTML =
+            '<div class="asset-cleaner-usage-dialog-content" style="background: var(--white); width: 100%; max-width: 520px; max-height: 80vh; overflow: auto; border-radius: var(--large-border-radius); box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3); padding: 24px;">' +
+            '<div style="display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:16px;">' +
+            '<h2 style="margin:0;">' +
+            (t.usageDialogTitle || t.viewUsage || "View Usage") +
+            "</h2>" +
+            '<button type="button" class="btn small asset-cleaner-usage-close-btn">' +
+            (t.cancel || "Close") +
+            "</button>" +
+            "</div>" +
+            '<p style="margin:0 0 16px; color: var(--gray-600);">' +
+            (t.usageDialogText ||
+                "Choose how usage should be evaluated for this asset.") +
+            "</p>" +
+            '<div class="asset-cleaner-usage-options" style="display:flex; flex-direction:column; gap:12px; margin-bottom:16px;">' +
+            '<label style="display:flex; align-items:flex-start; gap:8px;">' +
+            '<input type="checkbox" class="asset-cleaner-usage-include-drafts"' +
+            (usageDefaults.includeDrafts ? " checked" : "") +
+            ">" +
+            "<span>" +
+            (t.includeDrafts || "Include drafts") +
+            "</span>" +
+            "</label>" +
+            '<label style="display:flex; align-items:flex-start; gap:8px;">' +
+            '<input type="checkbox" class="asset-cleaner-usage-include-revisions"' +
+            (usageDefaults.includeRevisions ? " checked" : "") +
+            ">" +
+            "<span>" +
+            (t.includeRevisions || "Include revisions") +
+            "</span>" +
+            "</label>" +
+            '<label style="display:flex; flex-direction:column; align-items:flex-start; gap:4px;">' +
+            '<span style="display:flex; align-items:flex-start; gap:8px;">' +
+            '<input type="checkbox" class="asset-cleaner-usage-count-relations"' +
+            (usageDefaults.countAllRelationsAsUsage ? " checked" : "") +
+            ">" +
+            "<span>" +
+            (t.countAllRelationsAsUsage ||
+                "Count all relational references as usage") +
+            "</span>" +
+            "</span>" +
+            '<span style="color: var(--gray-500); font-size: 12px; padding-left: 24px;">' +
+            (t.countAllRelationsAsUsageHelp ||
+                "Recommended for projects with plugin-defined or unknown element types that may store asset relations outside normal entry content.") +
+            "</span>" +
+            "</label>" +
+            "</div>" +
+            '<div style="display:flex; gap:8px; margin-bottom:16px;">' +
+            '<button type="button" class="btn submit asset-cleaner-usage-check-btn">' +
+            (t.checkUsage || "Check Usage") +
+            "</button>" +
+            '<button type="button" class="btn asset-cleaner-usage-cancel-btn">' +
+            (t.cancel || "Cancel") +
+            "</button>" +
+            "</div>" +
+            '<div class="asset-cleaner-usage-results asset-cleaner-popover">' +
+            '<p class="not-used" style="font-style:normal;">' +
+            (t.chooseUsageOptions ||
+                "Choose the usage options you want to check, then confirm.") +
+            "</p>" +
+            "</div>" +
+            "</div>";
+
+        document.body.appendChild(dialog);
+
+        dialog.addEventListener("click", function (e) {
+            if (e.target === dialog) {
+                closeUsageDialog();
+            }
+        });
+
+        dialog
+            .querySelector(".asset-cleaner-usage-close-btn")
+            .addEventListener("click", closeUsageDialog);
+        dialog
+            .querySelector(".asset-cleaner-usage-cancel-btn")
+            .addEventListener("click", closeUsageDialog);
+        dialog
+            .querySelector(".asset-cleaner-usage-check-btn")
+            .addEventListener("click", function () {
+                submitUsageDialog(dialog, assetId);
+            });
+    }
+
+    function closeUsageDialog() {
+        const dialog = document.getElementById("asset-cleaner-usage-dialog");
+        if (dialog) {
+            dialog.remove();
+        }
+    }
+
+    function submitUsageDialog(dialog, assetId) {
+        const results = dialog.querySelector(".asset-cleaner-usage-results");
+        const checkBtn = dialog.querySelector(".asset-cleaner-usage-check-btn");
+        const includeDrafts = !!dialog.querySelector(
+            ".asset-cleaner-usage-include-drafts",
+        ).checked;
+        const includeRevisions = !!dialog.querySelector(
+            ".asset-cleaner-usage-include-revisions",
+        ).checked;
+        const countAllRelationsAsUsage = !!dialog.querySelector(
+            ".asset-cleaner-usage-count-relations",
+        ).checked;
+
+        checkBtn.disabled = true;
+        results.innerHTML =
             '<div class="spinner"></div><span>' +
             (t.loading || "Loading...") +
             "</span>";
 
-        // Position popover - right-aligned to button
-        const rect = btn.getBoundingClientRect();
-        popover.style.position = "fixed";
-        popover.style.top = rect.bottom + 8 + "px";
-        popover.style.right = window.innerWidth - rect.right + "px";
-        popover.style.zIndex = "1000";
-
-        document.body.appendChild(popover);
-
-        // Fetch usage data
         Craft.sendActionRequest("GET", "asset-cleaner/usage/get", {
-            params: { assetId: assetId },
+            params: {
+                assetId: assetId,
+                includeDrafts: includeDrafts,
+                includeRevisions: includeRevisions,
+                countAllRelationsAsUsage: countAllRelationsAsUsage,
+            },
         })
             .then(function (response) {
-                renderUsagePopover(popover, response.data);
+                renderUsageDialogResults(results, response.data);
             })
             .catch(function () {
-                popover.innerHTML =
+                results.innerHTML =
                     '<p class="error">' +
                     (t.error || "An error occurred.") +
                     "</p>";
+            })
+            .finally(function () {
+                checkBtn.disabled = false;
             });
-
-        // Close on click outside
-        setTimeout(function () {
-            document.addEventListener("click", closePopoverOnClickOutside);
-        }, 100);
     }
 
-    function renderUsagePopover(popover, data) {
+    function renderUsageDialogResults(container, data) {
+        if (!data || !data.success) {
+            container.innerHTML =
+                '<p class="error">' +
+                ((data && data.error) || t.error || "An error occurred.") +
+                "</p>";
+            return;
+        }
+
         if (!data.isUsed) {
-            popover.innerHTML =
+            container.innerHTML =
                 '<p class="not-used">' +
                 (t.notUsed || "This asset is not used anywhere.") +
                 "</p>";
@@ -101,13 +213,68 @@
             data.usage.relations.forEach(function (entry) {
                 html += "<li>";
                 html += '<a href="' + entry.url + '" target="_blank">';
-                html += '<span class="status ' + entry.status + '"></span>';
-                html += escapeHtml(entry.title);
-                html +=
-                    '<span class="section-name">(' +
-                    escapeHtml(entry.section) +
-                    ")</span>";
-                html += "</a></li>";
+
+                if (entry.status) {
+                    html +=
+                        '<span class="status ' +
+                        escapeHtml(entry.status) +
+                        '"></span>';
+                }
+
+                html += escapeHtml(entry.title || entry.label || "Relation");
+
+                if (entry.section) {
+                    html +=
+                        '<span class="section-name">(' +
+                        escapeHtml(entry.section) +
+                        ")</span>";
+                } else if (entry.sourceType) {
+                    html +=
+                        '<span class="section-name">(' +
+                        escapeHtml(entry.sourceType) +
+                        ")</span>";
+                }
+
+                html += "</a>";
+                html += "</li>";
+            });
+            html += "</ul></div>";
+        }
+
+        if (data.usage.otherRelations && data.usage.otherRelations.length > 0) {
+            html += '<div class="usage-section">';
+            html +=
+                "<h4>" +
+                (t.otherRelationalElements || "Other Relational Elements") +
+                "</h4>";
+            html += '<ul class="usage-list">';
+            data.usage.otherRelations.forEach(function (entry) {
+                html += "<li>";
+                html += '<div class="usage-row">';
+
+                if (entry.status) {
+                    html +=
+                        '<span class="status ' +
+                        escapeHtml(entry.status) +
+                        '"></span>';
+                }
+
+                html += escapeHtml(entry.title || entry.label || "Relation");
+
+                if (entry.section) {
+                    html +=
+                        '<span class="section-name">(' +
+                        escapeHtml(entry.section) +
+                        ")</span>";
+                } else if (entry.sourceType) {
+                    html +=
+                        '<span class="section-name">(' +
+                        escapeHtml(entry.sourceType) +
+                        ")</span>";
+                }
+
+                html += "</div>";
+                html += "</li>";
             });
             html += "</ul></div>";
         }
@@ -133,19 +300,7 @@
             html += "</ul></div>";
         }
 
-        popover.innerHTML = html;
-    }
-
-    function closePopoverOnClickOutside(e) {
-        const popover = document.querySelector(".asset-cleaner-popover");
-        if (
-            popover &&
-            !popover.contains(e.target) &&
-            !e.target.closest(".asset-cleaner-usage-btn")
-        ) {
-            popover.remove();
-            document.removeEventListener("click", closePopoverOnClickOutside);
-        }
+        container.innerHTML = html;
     }
 
     // ========================================
@@ -273,7 +428,15 @@
 
                     showScanTime(container, scanTime);
                 } catch (e) {
-                    // Don't freeze the UI if rendering fails
+                    console.error(
+                        "Asset Cleaner: failed to restore last scan UI.",
+                        e,
+                    );
+                    if (Craft && Craft.cp && Craft.cp.displayWarning) {
+                        Craft.cp.displayWarning(
+                            t.error || "An error occurred.",
+                        );
+                    }
                 }
             })
             .catch(function () {
@@ -331,6 +494,25 @@
         const loadingText = loading.querySelector(".loading-text");
         const queueHint = container.querySelector(".asset-cleaner-queue-hint");
         const scanBtn = container.querySelector(".asset-cleaner-scan-btn");
+        const includeDraftsInput = container.querySelector(
+            'input[type="checkbox"][name="includeDrafts"]',
+        );
+        const includeDrafts = !!(
+            includeDraftsInput && includeDraftsInput.checked
+        );
+        const includeRevisionsInput = container.querySelector(
+            'input[type="checkbox"][name="includeRevisions"]',
+        );
+        const includeRevisions = !!(
+            includeRevisionsInput && includeRevisionsInput.checked
+        );
+        const countAllRelationsAsUsageInput = container.querySelector(
+            'input[type="checkbox"][name="countAllRelationsAsUsage"]',
+        );
+        const countAllRelationsAsUsage = !!(
+            countAllRelationsAsUsageInput &&
+            countAllRelationsAsUsageInput.checked
+        );
 
         // Get selected volumes
         const volumeIds = [];
@@ -350,6 +532,7 @@
             });
 
         scanBtn.disabled = true;
+        hasWarnedPollFailure = false;
 
         loading.style.display = "flex";
         progressBarContainer.style.display = "block";
@@ -366,7 +549,12 @@
             "POST",
             "asset-cleaner/asset-cleaner/start-scan",
             {
-                data: { volumeIds: volumeIds },
+                data: {
+                    volumeIds: volumeIds,
+                    includeDrafts: includeDrafts,
+                    includeRevisions: includeRevisions,
+                    countAllRelationsAsUsage: countAllRelationsAsUsage,
+                },
             },
         )
             .then(function (response) {
@@ -531,8 +719,29 @@
                                 );
                             }
                         })
-                        .catch(function () {
-                            // Polling error — keep trying silently
+                        .catch(function (error) {
+                            console.warn(
+                                "Asset Cleaner: failed to poll scan progress.",
+                                error,
+                            );
+
+                            if (queueHint) {
+                                queueHint.style.display = "block";
+                            }
+
+                            if (!hasWarnedPollFailure) {
+                                hasWarnedPollFailure = true;
+                                if (
+                                    Craft &&
+                                    Craft.cp &&
+                                    Craft.cp.displayWarning
+                                ) {
+                                    Craft.cp.displayWarning(
+                                        t.scanPollingIssue ||
+                                            "Lost contact while polling scan progress. The scan may still be running.",
+                                    );
+                                }
+                            }
                         });
                 }, 1500);
             })
