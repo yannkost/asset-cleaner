@@ -83,4 +83,23 @@ return [
     // Scan Time
     'Scanned on {date}' => 'Gescand op {date}',
     'Restoring last scan...' => 'Laatste scan herstellen...',
+
+    // Usage Dialog / Scan Options
+    'Check Asset Usage' => 'Assetgebruik controleren',
+    'Choose how usage should be evaluated for this asset.' => 'Kies hoe het gebruik van dit asset moet worden beoordeeld.',
+    'Choose the usage options you want to check, then confirm.' => 'Kies de gebruiksopties die je wilt controleren en bevestig vervolgens.',
+    'Include drafts' => 'Concepten opnemen',
+    'Include revisions' => 'Revisies opnemen',
+    'Count all relational references as usage' => 'Alle relationele verwijzingen als gebruik tellen',
+    'Recommended for projects with plugin-defined or unknown element types that may store asset relations outside normal entry content.' => 'Aanbevolen voor projecten met door plugins gedefinieerde of onbekende elementtypes die asset-relaties buiten normale entry-inhoud kunnen opslaan.',
+    'Check Usage' => 'Gebruik controleren',
+    'Used by Relational Elements' => 'Gebruikt door relationele elementen',
+    'Other Relational Elements' => 'Andere relationele elementen',
+    'Relational element #{id}' => 'Relationeel element #{id}',
+    'Relational element' => 'Relationeel element',
+    'Include drafts in this scan' => 'Concepten opnemen in deze scan',
+    'When enabled, assets referenced only in drafts may be treated as used.' => 'Wanneer ingeschakeld, kunnen assets die alleen in concepten worden gebruikt als gebruikt worden beschouwd.',
+    'Include revisions in this scan' => 'Revisies opnemen in deze scan',
+    'When enabled, assets referenced only in revisions may be treated as used.' => 'Wanneer ingeschakeld, kunnen assets die alleen in revisies worden gebruikt als gebruikt worden beschouwd.',
+    'When enabled, any row in Craft’s relations table will cause an asset to be treated as used, including references created by plugin-defined or unknown element types. Disable this for a stricter scan.' => 'Wanneer ingeschakeld, zorgt elke rij in de relatietabel van Craft ervoor dat een asset als gebruikt wordt beschouwd, inclusief verwijzingen die zijn gemaakt door door plugins gedefinieerde of onbekende elementtypes. Schakel dit uit voor een strengere scan.',
 ];

@@ -93,4 +93,24 @@ return [
     // Scan Time
     'Scanned on {date}' => 'Scanned on {date}',
     'Restoring last scan...' => 'Restoring last scan...',
+
+    // Usage Dialog / Scan Options
+    'Check Asset Usage' => 'Check Asset Usage',
+    'Choose how usage should be evaluated for this asset.' => 'Choose how usage should be evaluated for this asset.',
+    'Choose the usage options you want to check, then confirm.' => 'Choose the usage options you want to check, then confirm.',
+    'Include drafts' => 'Include drafts',
+    'Include revisions' => 'Include revisions',
+    'Count all relational references as usage' => 'Count all relational references as usage',
+    'Recommended for projects with plugin-defined or unknown element types that may store asset relations outside normal entry content.' => 'Recommended for projects with plugin-defined or unknown element types that may store asset relations outside normal entry content.',
+    'Check Usage' => 'Check Usage',
+    'Used by Relational Elements' => 'Used by Relational Elements',
+    'Other Relational Elements' => 'Other Relational Elements',
+    'Relational element #{id}' => 'Relational element #{id}',
+    'Relational element' => 'Relational element',
+    'Include drafts in this scan' => 'Include drafts in this scan',
+    'When enabled, assets referenced only in drafts may be treated as used.' => 'When enabled, assets referenced only in drafts may be treated as used.',
+    'Include revisions in this scan' => 'Include revisions in this scan',
+    'When enabled, assets referenced only in revisions may be treated as used.' => 'When enabled, assets referenced only in revisions may be treated as used.',
+    'Count all relational references as usage' => 'Count all relational references as usage',
+    'When enabled, any row in Craft’s relations table will cause an asset to be treated as used, including references created by plugin-defined or unknown element types. Disable this for a stricter scan.' => 'When enabled, any row in Craft’s relations table will cause an asset to be treated as used, including references created by plugin-defined or unknown element types. Disable this for a stricter scan.',
 ];

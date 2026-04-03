@@ -83,4 +83,22 @@ return [
     // Scan Time
     'Scanned on {date}' => 'Сканування виконано {date}',
     'Restoring last scan...' => 'Відновлення останнього сканування...',
+    // Usage Dialog / Scan Options
+    'Check Asset Usage' => 'Перевірити використання ресурсу',
+    'Choose how usage should be evaluated for this asset.' => 'Виберіть, як слід оцінювати використання цього ресурсу.',
+    'Choose the usage options you want to check, then confirm.' => 'Виберіть параметри використання, які потрібно перевірити, а потім підтвердьте.',
+    'Include drafts' => 'Включити чернетки',
+    'Include revisions' => 'Включити ревізії',
+    'Count all relational references as usage' => 'Вважати всі реляційні посилання використанням',
+    'Recommended for projects with plugin-defined or unknown element types that may store asset relations outside normal entry content.' => 'Рекомендовано для проєктів із типами елементів, визначеними плагінами або невідомими, які можуть зберігати зв’язки ресурсів поза межами звичайного вмісту записів.',
+    'Check Usage' => 'Перевірити використання',
+    'Used by Relational Elements' => 'Використовується реляційними елементами',
+    'Other Relational Elements' => 'Інші реляційні елементи',
+    'Relational element #{id}' => 'Реляційний елемент #{id}',
+    'Relational element' => 'Реляційний елемент',
+    'Include drafts in this scan' => 'Включити чернетки в це сканування',
+    'When enabled, assets referenced only in drafts may be treated as used.' => 'Якщо ввімкнено, ресурси, на які є посилання лише в чернетках, можуть вважатися використаними.',
+    'Include revisions in this scan' => 'Включити ревізії в це сканування',
+    'When enabled, assets referenced only in revisions may be treated as used.' => 'Якщо ввімкнено, ресурси, на які є посилання лише в ревізіях, можуть вважатися використаними.',
+    'When enabled, any row in Craft’s relations table will cause an asset to be treated as used, including references created by plugin-defined or unknown element types. Disable this for a stricter scan.' => 'Якщо ввімкнено, будь-який рядок у таблиці зв’язків Craft призводитиме до того, що ресурс вважатиметься використаним, включно з посиланнями, створеними типами елементів, визначеними плагінами або невідомими. Вимкніть це для суворішого сканування.',
 ];

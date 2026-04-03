@@ -83,4 +83,22 @@ return [
     // Scan Time
     'Scanned on {date}' => 'Szkennelve: {date}',
     'Restoring last scan...' => 'Utolsó szkennelés visszaállítása...',
+    // Usage Dialog / Scan Options
+    'Check Asset Usage' => 'Eszközhasználat ellenőrzése',
+    'Choose how usage should be evaluated for this asset.' => 'Válassza ki, hogyan értékelje a rendszer ennek az eszköznek a használatát.',
+    'Choose the usage options you want to check, then confirm.' => 'Válassza ki az ellenőrizni kívánt használati beállításokat, majd erősítse meg.',
+    'Include drafts' => 'Piszkozatok belefoglalása',
+    'Include revisions' => 'Revíziók belefoglalása',
+    'Count all relational references as usage' => 'Minden kapcsolati hivatkozás használatnak számítson',
+    'Recommended for projects with plugin-defined or unknown element types that may store asset relations outside normal entry content.' => 'Ajánlott olyan projektekhez, ahol pluginek által definiált vagy ismeretlen elemtípusok az eszközkapcsolatokat a normál bejegyzéstartalmon kívül tárolhatják.',
+    'Check Usage' => 'Használat ellenőrzése',
+    'Used by Relational Elements' => 'Kapcsolódó elemek használják',
+    'Other Relational Elements' => 'Egyéb kapcsolódó elemek',
+    'Relational element #{id}' => 'Kapcsolódó elem #{id}',
+    'Relational element' => 'Kapcsolódó elem',
+    'Include drafts in this scan' => 'Piszkozatok belefoglalása ebbe a vizsgálatba',
+    'When enabled, assets referenced only in drafts may be treated as used.' => 'Ha engedélyezve van, a csak piszkozatokban hivatkozott eszközök használatban lévőként lesznek kezelve.',
+    'Include revisions in this scan' => 'Revíziók belefoglalása ebbe a vizsgálatba',
+    'When enabled, assets referenced only in revisions may be treated as used.' => 'Ha engedélyezve van, a csak revíziókban hivatkozott eszközök használatban lévőként lesznek kezelve.',
+    'When enabled, any row in Craft’s relations table will cause an asset to be treated as used, including references created by plugin-defined or unknown element types. Disable this for a stricter scan.' => 'Ha engedélyezve van, a Craft kapcsolati táblájának bármely sora miatt az eszköz használatban lévőnek számít, beleértve a pluginek által definiált vagy ismeretlen elemtípusok által létrehozott hivatkozásokat is. Szigorúbb vizsgálathoz kapcsolja ki.',
 ];

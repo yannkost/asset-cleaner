@@ -83,4 +83,23 @@ return [
     // Scan Time
     'Scanned on {date}' => '扫描于 {date}',
     'Restoring last scan...' => '正在恢复上次扫描...',
+
+    // Usage Dialog / Scan Options
+    'Check Asset Usage' => '检查资源使用情况',
+    'Choose how usage should be evaluated for this asset.' => '选择如何评估此资源的使用情况。',
+    'Choose the usage options you want to check, then confirm.' => '选择要检查的使用选项，然后确认。',
+    'Include drafts' => '包含草稿',
+    'Include revisions' => '包含修订',
+    'Count all relational references as usage' => '将所有关系引用计为使用',
+    'Recommended for projects with plugin-defined or unknown element types that may store asset relations outside normal entry content.' => '建议用于包含插件定义或未知元素类型的项目，这些类型可能会在普通条目内容之外存储资源关系。',
+    'Check Usage' => '检查使用情况',
+    'Used by Relational Elements' => '被关系元素使用',
+    'Other Relational Elements' => '其他关系元素',
+    'Relational element #{id}' => '关系元素 #{id}',
+    'Relational element' => '关系元素',
+    'Include drafts in this scan' => '在此次扫描中包含草稿',
+    'When enabled, assets referenced only in drafts may be treated as used.' => '启用后，仅在草稿中被引用的资源也可能被视为已使用。',
+    'Include revisions in this scan' => '在此次扫描中包含修订',
+    'When enabled, assets referenced only in revisions may be treated as used.' => '启用后，仅在修订中被引用的资源也可能被视为已使用。',
+    'When enabled, any row in Craft’s relations table will cause an asset to be treated as used, including references created by plugin-defined or unknown element types. Disable this for a stricter scan.' => '启用后，Craft 关系表中的任何一行都会使资源被视为已使用，包括由插件定义或未知元素类型创建的引用。若要进行更严格的扫描，请禁用此选项。',
 ];

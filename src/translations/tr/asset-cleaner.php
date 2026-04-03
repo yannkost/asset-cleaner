@@ -83,4 +83,23 @@ return [
     // Scan Time
     'Scanned on {date}' => '{date} tarihinde tarandı',
     'Restoring last scan...' => 'Son tarama geri yükleniyor...',
+
+    // Usage Dialog / Scan Options
+    'Check Asset Usage' => 'Varlık kullanımını kontrol et',
+    'Choose how usage should be evaluated for this asset.' => 'Bu varlığın kullanımının nasıl değerlendirileceğini seçin.',
+    'Choose the usage options you want to check, then confirm.' => 'Kontrol etmek istediğiniz kullanım seçeneklerini seçin ve ardından onaylayın.',
+    'Include drafts' => 'Taslakları dahil et',
+    'Include revisions' => 'Revizyonları dahil et',
+    'Count all relational references as usage' => 'Tüm ilişkisel referansları kullanım olarak say',
+    'Recommended for projects with plugin-defined or unknown element types that may store asset relations outside normal entry content.' => 'Normal giriş içeriğinin dışında varlık ilişkileri saklayabilen eklenti tanımlı veya bilinmeyen öğe türlerine sahip projeler için önerilir.',
+    'Check Usage' => 'Kullanımı kontrol et',
+    'Used by Relational Elements' => 'İlişkisel öğeler tarafından kullanılıyor',
+    'Other Relational Elements' => 'Diğer ilişkisel öğeler',
+    'Relational element #{id}' => 'İlişkisel öğe #{id}',
+    'Relational element' => 'İlişkisel öğe',
+    'Include drafts in this scan' => 'Bu taramada taslakları dahil et',
+    'When enabled, assets referenced only in drafts may be treated as used.' => 'Etkinleştirildiğinde, yalnızca taslaklarda referans verilen varlıklar kullanılıyor olarak değerlendirilebilir.',
+    'Include revisions in this scan' => 'Bu taramada revizyonları dahil et',
+    'When enabled, assets referenced only in revisions may be treated as used.' => 'Etkinleştirildiğinde, yalnızca revizyonlarda referans verilen varlıklar kullanılıyor olarak değerlendirilebilir.',
+    'When enabled, any row in Craft’s relations table will cause an asset to be treated as used, including references created by plugin-defined or unknown element types. Disable this for a stricter scan.' => 'Etkinleştirildiğinde, Craft’in ilişkiler tablosundaki herhangi bir satır, eklenti tanımlı veya bilinmeyen öğe türleri tarafından oluşturulan referanslar dahil olmak üzere, bir varlığın kullanılıyor olarak değerlendirilmesine neden olur. Daha katı bir tarama için bunu devre dışı bırakın.',
 ];

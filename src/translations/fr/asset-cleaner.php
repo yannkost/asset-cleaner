@@ -83,4 +83,23 @@ return [
     // Scan Time
     'Scanned on {date}' => 'Scanné le {date}',
     'Restoring last scan...' => 'Restauration du dernier scan...',
+
+    // Usage Dialog / Scan Options
+    'Check Asset Usage' => 'Vérifier l’utilisation de la ressource',
+    'Choose how usage should be evaluated for this asset.' => 'Choisissez comment l’utilisation doit être évaluée pour cette ressource.',
+    'Choose the usage options you want to check, then confirm.' => 'Choisissez les options d’utilisation à vérifier, puis confirmez.',
+    'Include drafts' => 'Inclure les brouillons',
+    'Include revisions' => 'Inclure les révisions',
+    'Count all relational references as usage' => 'Compter toutes les références relationnelles comme une utilisation',
+    'Recommended for projects with plugin-defined or unknown element types that may store asset relations outside normal entry content.' => 'Recommandé pour les projets avec des types d’éléments définis par des plugins ou inconnus pouvant stocker des relations de ressources en dehors du contenu normal des entrées.',
+    'Check Usage' => 'Vérifier l’utilisation',
+    'Used by Relational Elements' => 'Utilisé par des éléments relationnels',
+    'Other Relational Elements' => 'Autres éléments relationnels',
+    'Relational element #{id}' => 'Élément relationnel #{id}',
+    'Relational element' => 'Élément relationnel',
+    'Include drafts in this scan' => 'Inclure les brouillons dans ce scan',
+    'When enabled, assets referenced only in drafts may be treated as used.' => 'Lorsqu’elle est activée, les ressources référencées uniquement dans des brouillons peuvent être considérées comme utilisées.',
+    'Include revisions in this scan' => 'Inclure les révisions dans ce scan',
+    'When enabled, assets referenced only in revisions may be treated as used.' => 'Lorsqu’elle est activée, les ressources référencées uniquement dans des révisions peuvent être considérées comme utilisées.',
+    'When enabled, any row in Craft’s relations table will cause an asset to be treated as used, including references created by plugin-defined or unknown element types. Disable this for a stricter scan.' => 'Lorsqu’elle est activée, toute ligne dans la table des relations de Craft entraînera qu’une ressource soit considérée comme utilisée, y compris les références créées par des types d’éléments définis par des plugins ou inconnus. Désactivez cette option pour un scan plus strict.',
 ];

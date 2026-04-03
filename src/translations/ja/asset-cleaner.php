@@ -83,4 +83,22 @@ return [
     // Scan Time
     'Scanned on {date}' => '{date} にスキャン済み',
     'Restoring last scan...' => '前回のスキャンを復元中...',
+    // Usage Dialog / Scan Options
+    'Check Asset Usage' => 'アセットの使用状況を確認',
+    'Choose how usage should be evaluated for this asset.' => 'このアセットの使用状況をどのように判定するか選択してください。',
+    'Choose the usage options you want to check, then confirm.' => '確認したい使用条件を選択してから実行してください。',
+    'Include drafts' => '下書きを含める',
+    'Include revisions' => 'リビジョンを含める',
+    'Count all relational references as usage' => 'すべての関連参照を使用中として扱う',
+    'Recommended for projects with plugin-defined or unknown element types that may store asset relations outside normal entry content.' => '通常のエントリ内容以外にアセットの関連情報を保存する、プラグイン定義または不明な要素タイプを含むプロジェクトに推奨されます。',
+    'Check Usage' => '使用状況を確認',
+    'Used by Relational Elements' => '関連要素で使用中',
+    'Other Relational Elements' => 'その他の関連要素',
+    'Relational element #{id}' => '関連要素 #{id}',
+    'Relational element' => '関連要素',
+    'Include drafts in this scan' => 'このスキャンで下書きを含める',
+    'When enabled, assets referenced only in drafts may be treated as used.' => '有効にすると、下書きだけで参照されているアセットも使用中として扱われる場合があります。',
+    'Include revisions in this scan' => 'このスキャンでリビジョンを含める',
+    'When enabled, assets referenced only in revisions may be treated as used.' => '有効にすると、リビジョンだけで参照されているアセットも使用中として扱われる場合があります。',
+    'When enabled, any row in Craft’s relations table will cause an asset to be treated as used, including references created by plugin-defined or unknown element types. Disable this for a stricter scan.' => '有効にすると、Craft の relations テーブルにある任意の行によって、そのアセットは使用中として扱われます。これには、プラグイン定義または不明な要素タイプによって作成された参照も含まれます。より厳密に確認したい場合は無効にしてください。',
 ];

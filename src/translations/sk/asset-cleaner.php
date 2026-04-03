@@ -83,4 +83,22 @@ return [
     // Scan Time
     'Scanned on {date}' => 'Naskenované {date}',
     'Restoring last scan...' => 'Obnovovanie posledného skenu...',
+    // Usage Dialog / Scan Options
+    'Check Asset Usage' => 'Skontrolovať použitie assetu',
+    'Choose how usage should be evaluated for this asset.' => 'Vyberte, ako sa má vyhodnotiť použitie tohto assetu.',
+    'Choose the usage options you want to check, then confirm.' => 'Vyberte možnosti použitia, ktoré chcete skontrolovať, a potom potvrďte.',
+    'Include drafts' => 'Zahrnúť koncepty',
+    'Include revisions' => 'Zahrnúť revízie',
+    'Count all relational references as usage' => 'Počítať všetky relačné odkazy ako použitie',
+    'Recommended for projects with plugin-defined or unknown element types that may store asset relations outside normal entry content.' => 'Odporúčané pre projekty s typmi prvkov definovanými pluginmi alebo neznámymi typmi, ktoré môžu ukladať vzťahy assetov mimo bežného obsahu záznamov.',
+    'Check Usage' => 'Skontrolovať použitie',
+    'Used by Relational Elements' => 'Používané relačnými prvkami',
+    'Other Relational Elements' => 'Ďalšie relačné prvky',
+    'Relational element #{id}' => 'Relačný prvok č. {id}',
+    'Relational element' => 'Relačný prvok',
+    'Include drafts in this scan' => 'Zahrnúť koncepty do tohto skenovania',
+    'When enabled, assets referenced only in drafts may be treated as used.' => 'Ak je táto možnosť zapnutá, assety odkazované iba v konceptoch sa môžu považovať za používané.',
+    'Include revisions in this scan' => 'Zahrnúť revízie do tohto skenovania',
+    'When enabled, assets referenced only in revisions may be treated as used.' => 'Ak je táto možnosť zapnutá, assety odkazované iba v revíziách sa môžu považovať za používané.',
+    'When enabled, any row in Craft’s relations table will cause an asset to be treated as used, including references created by plugin-defined or unknown element types. Disable this for a stricter scan.' => 'Ak je táto možnosť zapnutá, akýkoľvek riadok v tabuľke vzťahov Craftu spôsobí, že asset bude považovaný za používaný, vrátane odkazov vytvorených pluginmi definovanými alebo neznámymi typmi prvkov. Pre prísnejšie skenovanie túto možnosť vypnite.',
 ];

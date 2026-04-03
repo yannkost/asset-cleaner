@@ -83,4 +83,22 @@ return [
     // Scan Time
     'Scanned on {date}' => '{date}에 스캔됨',
     'Restoring last scan...' => '마지막 스캔 복원 중...',
+    // Usage Dialog / Scan Options
+    'Check Asset Usage' => '에셋 사용 여부 확인',
+    'Choose how usage should be evaluated for this asset.' => '이 에셋의 사용 여부를 어떻게 평가할지 선택하세요.',
+    'Choose the usage options you want to check, then confirm.' => '확인할 사용 옵션을 선택한 다음 확인하세요.',
+    'Include drafts' => '드래프트 포함',
+    'Include revisions' => '리비전 포함',
+    'Count all relational references as usage' => '모든 관계형 참조를 사용으로 간주',
+    'Recommended for projects with plugin-defined or unknown element types that may store asset relations outside normal entry content.' => '일반적인 엔트리 콘텐츠 외부에 에셋 관계를 저장할 수 있는 플러그인 정의 또는 알 수 없는 요소 타입이 있는 프로젝트에 권장됩니다.',
+    'Check Usage' => '사용 여부 확인',
+    'Used by Relational Elements' => '관계형 요소에서 사용됨',
+    'Other Relational Elements' => '기타 관계형 요소',
+    'Relational element #{id}' => '관계형 요소 #{id}',
+    'Relational element' => '관계형 요소',
+    'Include drafts in this scan' => '이 스캔에 드래프트 포함',
+    'When enabled, assets referenced only in drafts may be treated as used.' => '활성화하면 드래프트에서만 참조되는 에셋도 사용 중으로 간주될 수 있습니다.',
+    'Include revisions in this scan' => '이 스캔에 리비전 포함',
+    'When enabled, assets referenced only in revisions may be treated as used.' => '활성화하면 리비전에서만 참조되는 에셋도 사용 중으로 간주될 수 있습니다.',
+    'When enabled, any row in Craft’s relations table will cause an asset to be treated as used, including references created by plugin-defined or unknown element types. Disable this for a stricter scan.' => '활성화하면 Craft의 relations 테이블에 있는 모든 행이 에셋을 사용 중으로 간주하게 되며, 플러그인으로 정의되었거나 알 수 없는 요소 타입이 만든 참조도 포함됩니다. 더 엄격한 스캔을 원하면 이 옵션을 끄세요.',
 ];
