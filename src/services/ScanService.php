@@ -606,7 +606,7 @@ class ScanService extends Component
                     continue;
                 }
 
-                foreach ($htmlFields as $field) {
+                foreach ($this->getHtmlFieldsForElement($entry) as $field) {
                     try {
                         $fieldValue = $entry->getFieldValue($field->handle);
                     } catch (\Throwable $e) {
@@ -674,15 +674,7 @@ class ScanService extends Component
 
         foreach (GlobalSet::find()->all() as $globalSet) {
             /** @var GlobalSet $globalSet */
-            $fieldLayout = $globalSet->getFieldLayout();
-            if (!$fieldLayout) {
-                continue;
-            }
-
-            foreach ($fieldLayout->getCustomFields() as $field) {
-                if (!$this->isHtmlField($field)) {
-                    continue;
-                }
+            foreach ($this->getHtmlFieldsForElement($globalSet) as $field) {
 
                 try {
                     $fieldValue = $globalSet->getFieldValue($field->handle);
@@ -1296,6 +1288,59 @@ class ScanService extends Component
     }
 
     /**
+     * @param object $element
+     * @return array
+     */
+    private function getHtmlFieldsForElement(object $element): array
+    {
+        if (!method_exists($element, "getFieldLayout")) {
+            return [];
+        }
+
+        try {
+            $fieldLayout = $element->getFieldLayout();
+        } catch (\Throwable $e) {
+            Logger::warning(
+                "Skipping element during content scan because its field layout could not be resolved.",
+                [
+                    "elementId" => (int) ($element->id ?? 0),
+                    "elementType" => get_class($element),
+                    "error" => $e->getMessage(),
+                ],
+            );
+
+            return [];
+        }
+
+        if (!$fieldLayout) {
+            return [];
+        }
+
+        try {
+            $customFields = $fieldLayout->getCustomFields();
+        } catch (\Throwable $e) {
+            Logger::warning(
+                "Skipping element during content scan because its field layout custom fields could not be resolved.",
+                [
+                    "elementId" => (int) ($element->id ?? 0),
+                    "elementType" => get_class($element),
+                    "fieldLayoutId" => (int) ($fieldLayout->id ?? 0),
+                    "error" => $e->getMessage(),
+                ],
+            );
+
+            return [];
+        }
+
+        return array_values(
+            array_filter(
+                $customFields,
+                fn($field) => $this->isHtmlField($field),
+            ),
+        );
+    }
+
+    /**
      * @param mixed $field
      * @return bool
      */
@@ -1323,8 +1368,36 @@ class ScanService extends Component
         }
 
         $relevantLayoutIds = [];
-        foreach (Craft::$app->getFields()->getAllLayouts() as $layout) {
-            foreach ($layout->getCustomFields() as $field) {
+
+        try {
+            $layouts = Craft::$app->getFields()->getAllLayouts();
+        } catch (\Throwable $e) {
+            Logger::warning(
+                "Skipping content scan entry type discovery because field layouts could not be loaded.",
+                [
+                    "error" => $e->getMessage(),
+                ],
+            );
+
+            return [];
+        }
+
+        foreach ($layouts as $layout) {
+            try {
+                $customFields = $layout->getCustomFields();
+            } catch (\Throwable $e) {
+                Logger::warning(
+                    "Skipping field layout during content scan entry type discovery because its custom fields could not be resolved.",
+                    [
+                        "fieldLayoutId" => (int) ($layout->id ?? 0),
+                        "error" => $e->getMessage(),
+                    ],
+                );
+
+                continue;
+            }
+
+            foreach ($customFields as $field) {
                 if (in_array((int) $field->id, $fieldIds, true)) {
                     $relevantLayoutIds[] = (int) $layout->id;
                     break;
