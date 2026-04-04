@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-04-04
+
+### Changed
+- Split `AssetUsageService` into focused collaborators for entry usage resolution, relation usage resolution, and content usage scanning while preserving the existing public plugin service API
+- Standardized plugin logging so operational warnings remain useful without flooding the dedicated log with temporary relation-resolution investigation traces
+- Reduced scan lookup memory usage during content scans
+
+### Fixed
+- Fixed relation fallback usage checks so draft-only and revision-only relation sources no longer count as usage when those inclusion options are disabled
+- Fixed relation fallback handling to ignore trashed relation sources instead of treating them as generic usage
+- Fixed relation source resolution across sites and owner states for relation-backed asset usage checks
+- Fixed invalid field handle warnings during content usage checks by only reading HTML-capable fields from the concrete element field layout context
+- Hardened content field layout discovery so problematic layouts fail safely with warnings instead of breaking scans
+
 ## [1.3.0] - 2026-04-03
 
 ### Added

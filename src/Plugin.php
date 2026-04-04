@@ -15,6 +15,7 @@ use craft\services\Utilities;
 use craft\web\View;
 use craft\console\Application as ConsoleApplication;
 use yann\assetcleaner\assetbundles\assetcleaner\AssetCleanerAsset;
+use yann\assetcleaner\helpers\Logger;
 use yann\assetcleaner\models\Settings;
 use yann\assetcleaner\services\AssetUsageService;
 use yann\assetcleaner\services\ScanService;
@@ -354,11 +355,10 @@ class Plugin extends BasePlugin
                             );
                         }
                     } catch (\Throwable $e) {
-                        Craft::warning(
-                            "Could not read last scan state: " .
-                                $e->getMessage(),
-                            __METHOD__,
-                        );
+                        Logger::warning("Could not read last scan state.", [
+                            "error" => $e->getMessage(),
+                            "method" => __METHOD__,
+                        ]);
                     }
 
                     $view->registerJs(
@@ -368,10 +368,12 @@ class Plugin extends BasePlugin
                         View::POS_HEAD,
                     );
                 } catch (\Throwable $e) {
-                    Craft::error(
-                        "Error registering Asset Cleaner asset bundle: " .
-                            $e->getMessage(),
-                        __METHOD__,
+                    Logger::error(
+                        "Error registering Asset Cleaner asset bundle.",
+                        [
+                            "error" => $e->getMessage(),
+                            "method" => __METHOD__,
+                        ],
                     );
                 }
             },
@@ -408,11 +410,10 @@ class Plugin extends BasePlugin
                         "</button>" .
                         $event->html;
                 } catch (\Throwable $e) {
-                    Craft::error(
-                        "Error registering View Usage button: " .
-                            $e->getMessage(),
-                        __METHOD__,
-                    );
+                    Logger::error("Error registering View Usage button.", [
+                        "error" => $e->getMessage(),
+                        "method" => __METHOD__,
+                    ]);
                 }
             },
         );

@@ -8,6 +8,7 @@ use Craft;
 use craft\console\Controller;
 use craft\elements\Asset;
 use craft\helpers\Console;
+use yann\assetcleaner\helpers\Logger;
 use yann\assetcleaner\Plugin;
 use yii\console\ExitCode;
 
@@ -209,10 +210,22 @@ class ScanController extends Controller
                     $this->stdout("  Deleted: {$asset->filename}\n", Console::FG_GREEN);
                 } else {
                     $errors[] = $asset->filename;
+                    Logger::warning("Failed to delete asset from CLI command.", [
+                        'assetId' => (int)$asset->id,
+                        'filename' => (string)$asset->filename,
+                    ]);
                     $this->stdout("  Failed: {$asset->filename}\n", Console::FG_RED);
                 }
             } catch (\Throwable $e) {
                 $errors[] = $asset->filename . ': ' . $e->getMessage();
+                Logger::exception(
+                    "Error deleting asset from CLI command.",
+                    $e,
+                    [
+                        'assetId' => (int)$asset->id,
+                        'filename' => (string)$asset->filename,
+                    ]
+                );
                 $this->stdout("  Error: {$asset->filename} - {$e->getMessage()}\n", Console::FG_RED);
             }
         }

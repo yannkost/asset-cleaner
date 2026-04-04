@@ -582,6 +582,7 @@ class ScanService extends Component
                     $entry,
                     $includeDrafts,
                     $includeRevisions,
+                    $initiatingUserId,
                 );
 
                 if ($resolvedEntry === null) {
@@ -605,7 +606,7 @@ class ScanService extends Component
                     continue;
                 }
 
-                foreach ($htmlFields as $field) {
+                foreach ($this->getHtmlFieldsForElement($entry) as $field) {
                     try {
                         $fieldValue = $entry->getFieldValue($field->handle);
                     } catch (\Throwable $e) {
@@ -673,15 +674,7 @@ class ScanService extends Component
 
         foreach (GlobalSet::find()->all() as $globalSet) {
             /** @var GlobalSet $globalSet */
-            $fieldLayout = $globalSet->getFieldLayout();
-            if (!$fieldLayout) {
-                continue;
-            }
-
-            foreach ($fieldLayout->getCustomFields() as $field) {
-                if (!$this->isHtmlField($field)) {
-                    continue;
-                }
+            foreach ($this->getHtmlFieldsForElement($globalSet) as $field) {
 
                 try {
                     $fieldValue = $globalSet->getFieldValue($field->handle);
@@ -1088,7 +1081,15 @@ class ScanService extends Component
                     $volumeHandle,
                 );
             }
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            Logger::warning(
+                "Could not resolve asset volume metadata while building the scan snapshot record.",
+                [
+                    "assetId" => (int) ($asset->id ?? 0),
+                    "filename" => (string) ($asset->filename ?? ""),
+                    "error" => $e->getMessage(),
+                ],
+            );
             $volumeHandle = null;
             $volumePathPrefixes = [];
         }
@@ -1193,8 +1194,14 @@ class ScanService extends Component
                     }
                 }
             }
-        } catch (\Throwable) {
-            // Ignore inaccessible FS metadata.
+        } catch (\Throwable $e) {
+            Logger::warning(
+                "Could not resolve volume filesystem metadata while building scan path prefixes.",
+                [
+                    "volumeHandle" => $volumeHandle,
+                    "error" => $e->getMessage(),
+                ],
+            );
         }
 
         return array_values(
@@ -1207,11 +1214,16 @@ class ScanService extends Component
     /**
      * Build lookup maps from the stored asset snapshot.
      *
+     * Path candidates in the stored snapshot are already normalized, so this
+     * method keeps a compact map of either:
+     * - one unique asset ID for a candidate, or
+     * - `0` when the candidate is ambiguous across multiple assets.
+     *
      * @param string $scanId
      * @return array{
      *     scannedIds: array<int,bool>,
-     *     pathLookup: array<string,array<int>>,
-     *     filenameLookup: array<string,array<int>>
+     *     pathLookup: array<string,int>,
+     *     filenameLookup: array<string,int>
      * }
      */
     private function buildAssetLookups(string $scanId): array
@@ -1226,36 +1238,34 @@ class ScanService extends Component
             }
 
             $assetId = (int) $row["id"];
+            if ($assetId <= 0) {
+                continue;
+            }
+
             $scannedIds[$assetId] = true;
 
             $filename = trim((string) ($row["filename"] ?? ""));
             if ($filename !== "") {
                 $key = mb_strtolower($filename);
-                $filenameLookup[$key] ??= [];
-                $filenameLookup[$key][] = $assetId;
+                if (!isset($filenameLookup[$key])) {
+                    $filenameLookup[$key] = $assetId;
+                } elseif ($filenameLookup[$key] !== $assetId) {
+                    $filenameLookup[$key] = 0;
+                }
             }
 
             foreach ((array) ($row["pathCandidates"] ?? []) as $candidate) {
-                foreach (
-                    $this->normalizePathCandidates((string) $candidate)
-                    as $variant
-                ) {
-                    $pathLookup[$variant] ??= [];
-                    $pathLookup[$variant][] = $assetId;
+                $variant = trim((string) $candidate);
+                if ($variant === "") {
+                    continue;
+                }
+
+                if (!isset($pathLookup[$variant])) {
+                    $pathLookup[$variant] = $assetId;
+                } elseif ($pathLookup[$variant] !== $assetId) {
+                    $pathLookup[$variant] = 0;
                 }
             }
-        }
-
-        foreach ($pathLookup as $key => $ids) {
-            $pathLookup[$key] = array_values(
-                array_unique(array_map("intval", $ids)),
-            );
-        }
-
-        foreach ($filenameLookup as $key => $ids) {
-            $filenameLookup[$key] = array_values(
-                array_unique(array_map("intval", $ids)),
-            );
         }
 
         return [
@@ -1274,6 +1284,59 @@ class ScanService extends Component
 
         return array_values(
             array_filter($fields, fn($field) => $this->isHtmlField($field)),
+        );
+    }
+
+    /**
+     * @param object $element
+     * @return array
+     */
+    private function getHtmlFieldsForElement(object $element): array
+    {
+        if (!method_exists($element, "getFieldLayout")) {
+            return [];
+        }
+
+        try {
+            $fieldLayout = $element->getFieldLayout();
+        } catch (\Throwable $e) {
+            Logger::warning(
+                "Skipping element during content scan because its field layout could not be resolved.",
+                [
+                    "elementId" => (int) ($element->id ?? 0),
+                    "elementType" => get_class($element),
+                    "error" => $e->getMessage(),
+                ],
+            );
+
+            return [];
+        }
+
+        if (!$fieldLayout) {
+            return [];
+        }
+
+        try {
+            $customFields = $fieldLayout->getCustomFields();
+        } catch (\Throwable $e) {
+            Logger::warning(
+                "Skipping element during content scan because its field layout custom fields could not be resolved.",
+                [
+                    "elementId" => (int) ($element->id ?? 0),
+                    "elementType" => get_class($element),
+                    "fieldLayoutId" => (int) ($fieldLayout->id ?? 0),
+                    "error" => $e->getMessage(),
+                ],
+            );
+
+            return [];
+        }
+
+        return array_values(
+            array_filter(
+                $customFields,
+                fn($field) => $this->isHtmlField($field),
+            ),
         );
     }
 
@@ -1305,8 +1368,36 @@ class ScanService extends Component
         }
 
         $relevantLayoutIds = [];
-        foreach (Craft::$app->getFields()->getAllLayouts() as $layout) {
-            foreach ($layout->getCustomFields() as $field) {
+
+        try {
+            $layouts = Craft::$app->getFields()->getAllLayouts();
+        } catch (\Throwable $e) {
+            Logger::warning(
+                "Skipping content scan entry type discovery because field layouts could not be loaded.",
+                [
+                    "error" => $e->getMessage(),
+                ],
+            );
+
+            return [];
+        }
+
+        foreach ($layouts as $layout) {
+            try {
+                $customFields = $layout->getCustomFields();
+            } catch (\Throwable $e) {
+                Logger::warning(
+                    "Skipping field layout during content scan entry type discovery because its custom fields could not be resolved.",
+                    [
+                        "fieldLayoutId" => (int) ($layout->id ?? 0),
+                        "error" => $e->getMessage(),
+                    ],
+                );
+
+                continue;
+            }
+
+            foreach ($customFields as $field) {
                 if (in_array((int) $field->id, $fieldIds, true)) {
                     $relevantLayoutIds[] = (int) $layout->id;
                     break;
@@ -1358,10 +1449,13 @@ class ScanService extends Component
      * 2. normalized path / URL candidates
      * 3. unique filename fallback
      *
+     * Lookup maps store one unique asset ID per candidate, or `0` when the
+     * candidate is ambiguous and should not be matched automatically.
+     *
      * @param string $content
      * @param array<int,bool> $scannedIds
-     * @param array<string,array<int>> $pathLookup
-     * @param array<string,array<int>> $filenameLookup
+     * @param array<string,int> $pathLookup
+     * @param array<string,int> $filenameLookup
      * @return array<int>
      */
     private function extractReferencedAssetIds(
@@ -1442,9 +1536,9 @@ class ScanService extends Component
                 $this->normalizePathCandidates((string) $reference)
                 as $candidate
             ) {
-                $assetIds = $pathLookup[$candidate] ?? null;
-                if (is_array($assetIds) && count($assetIds) === 1) {
-                    $found[$assetIds[0]] = true;
+                $assetId = (int) ($pathLookup[$candidate] ?? 0);
+                if ($assetId > 0) {
+                    $found[$assetId] = true;
                     $matched = true;
                 }
             }
@@ -1457,12 +1551,9 @@ class ScanService extends Component
                 (string) parse_url((string) $reference, PHP_URL_PATH),
             );
             $filenameKey = mb_strtolower(trim($basename));
-            if (
-                $filenameKey !== "" &&
-                isset($filenameLookup[$filenameKey]) &&
-                count($filenameLookup[$filenameKey]) === 1
-            ) {
-                $found[$filenameLookup[$filenameKey][0]] = true;
+            $assetId = (int) ($filenameLookup[$filenameKey] ?? 0);
+            if ($filenameKey !== "" && $assetId > 0) {
+                $found[$assetId] = true;
             }
         }
 
@@ -1475,11 +1566,9 @@ class ScanService extends Component
         ) {
             foreach ($matches[1] as $filename) {
                 $key = mb_strtolower($filename);
-                if (
-                    isset($filenameLookup[$key]) &&
-                    count($filenameLookup[$key]) === 1
-                ) {
-                    $found[$filenameLookup[$key][0]] = true;
+                $assetId = (int) ($filenameLookup[$key] ?? 0);
+                if ($assetId > 0) {
+                    $found[$assetId] = true;
                 }
             }
         }
@@ -1558,21 +1647,13 @@ class ScanService extends Component
             return;
         }
 
-        if ($countAllRelationsAsUsage) {
-            $relationIds = (new Query())
-                ->select(["targetId"])
-                ->distinct()
-                ->from(Table::RELATIONS)
-                ->where(["targetId" => $assetIds])
-                ->column();
-        } else {
-            $relationIds = Plugin::getInstance()->assetUsage->getResolvedRelationUsageIds(
-                $assetIds,
-                $includeDrafts,
-                $includeRevisions,
-                $initiatingUserId,
-            );
-        }
+        $relationIds = Plugin::getInstance()->assetUsage->getResolvedRelationUsageIds(
+            $assetIds,
+            $includeDrafts,
+            $includeRevisions,
+            $initiatingUserId,
+            $countAllRelationsAsUsage,
+        );
 
         foreach ($relationIds as $relationId) {
             $usedIds[(int) $relationId] = true;
@@ -1758,7 +1839,15 @@ class ScanService extends Component
             if ($folder && $folder->path) {
                 $folderPath = (string) $folder->path;
             }
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            Logger::warning(
+                "Could not resolve asset folder metadata while building an unused asset result row.",
+                [
+                    "assetId" => (int) ($asset->id ?? 0),
+                    "filename" => (string) ($asset->filename ?? ""),
+                    "error" => $e->getMessage(),
+                ],
+            );
             $folderPath = "";
         }
 
