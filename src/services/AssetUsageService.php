@@ -1127,14 +1127,29 @@ class AssetUsageService extends Component
                     continue;
                 }
 
-                if (
-                    !$this->sourceCountsForFallbackRelationUsage(
-                        $sourceId,
-                        $includeDrafts,
-                        $includeRevisions,
-                        $initiatingUserId,
-                    )
-                ) {
+                $countsAsFallbackUsage = $this->sourceCountsForFallbackRelationUsage(
+                    $sourceId,
+                    $includeDrafts,
+                    $includeRevisions,
+                    $initiatingUserId,
+                );
+
+                if (!$countsAsFallbackUsage) {
+                    Logger::debug(
+                        "Skipping fallback relation record because the source does not count as usage under the current draft and revision policy.",
+                        [
+                            "assetId" => $assetId,
+                            "sourceId" => $sourceId,
+                            "includeDrafts" => $this->resolveIncludeDrafts(
+                                $includeDrafts,
+                            ),
+                            "includeRevisions" => $this->resolveIncludeRevisions(
+                                $includeRevisions,
+                            ),
+                            "initiatingUserId" => $initiatingUserId,
+                        ],
+                    );
+
                     continue;
                 }
 
@@ -1145,6 +1160,30 @@ class AssetUsageService extends Component
                     $initiatingUserId,
                 );
                 if ($resolvedEntry instanceof Entry) {
+                    Logger::debug(
+                        "Skipping generic fallback relation record because the source resolves to an entry under the current draft and revision policy.",
+                        [
+                            "assetId" => $assetId,
+                            "sourceId" => $sourceId,
+                            "resolvedEntryId" => (int) ($resolvedEntry->id ?? 0),
+                            "resolvedEntryCanonicalId" => method_exists(
+                                $resolvedEntry,
+                                "getCanonicalId",
+                            )
+                                ? (int) $resolvedEntry->getCanonicalId()
+                                : (isset($resolvedEntry->canonicalId)
+                                    ? (int) $resolvedEntry->canonicalId
+                                    : null),
+                            "includeDrafts" => $this->resolveIncludeDrafts(
+                                $includeDrafts,
+                            ),
+                            "includeRevisions" => $this->resolveIncludeRevisions(
+                                $includeRevisions,
+                            ),
+                            "initiatingUserId" => $initiatingUserId,
+                        ],
+                    );
+
                     continue;
                 }
 
@@ -1153,7 +1192,37 @@ class AssetUsageService extends Component
                     $initiatingUserId,
                 );
                 if ($record !== null) {
+                    Logger::debug(
+                        "Adding generic fallback relation record because the source counts as usage and does not resolve to an entry under the current draft and revision policy.",
+                        [
+                            "assetId" => $assetId,
+                            "sourceId" => $sourceId,
+                            "includeDrafts" => $this->resolveIncludeDrafts(
+                                $includeDrafts,
+                            ),
+                            "includeRevisions" => $this->resolveIncludeRevisions(
+                                $includeRevisions,
+                            ),
+                            "initiatingUserId" => $initiatingUserId,
+                        ],
+                    );
+
                     $genericRecords["generic-" . $sourceId] = $record;
+                } else {
+                    Logger::debug(
+                        "No generic fallback relation record was created after fallback relation source evaluation.",
+                        [
+                            "assetId" => $assetId,
+                            "sourceId" => $sourceId,
+                            "includeDrafts" => $this->resolveIncludeDrafts(
+                                $includeDrafts,
+                            ),
+                            "includeRevisions" => $this->resolveIncludeRevisions(
+                                $includeRevisions,
+                            ),
+                            "initiatingUserId" => $initiatingUserId,
+                        ],
+                    );
                 }
             }
         }
