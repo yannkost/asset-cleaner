@@ -530,7 +530,14 @@ class AssetUsageService extends Component
                     $folderPath = $folder->path;
                 }
             } catch (\Throwable $e) {
-                // Folder might not be accessible
+                Logger::warning(
+                    "Could not resolve asset folder while building unused asset data.",
+                    [
+                        "assetId" => (int) ($asset->id ?? 0),
+                        "filename" => (string) ($asset->filename ?? ""),
+                        "error" => $e->getMessage(),
+                    ],
+                );
             }
 
             // Get volume and build path
@@ -561,7 +568,15 @@ class AssetUsageService extends Component
                     }
                 }
             } catch (\Throwable $e) {
-                // Volume might not be accessible
+                Logger::warning(
+                    "Could not resolve asset volume while building unused asset data.",
+                    [
+                        "assetId" => (int) ($asset->id ?? 0),
+                        "filename" => (string) ($asset->filename ?? ""),
+                        "volumeId" => (int) ($asset->volumeId ?? 0),
+                        "error" => $e->getMessage(),
+                    ],
+                );
             }
 
             $result[] = [
@@ -627,7 +642,14 @@ class AssetUsageService extends Component
                     $volumeIndicators[] = basename($fs->getRootPath());
                 }
             } catch (\Throwable $e) {
-                // skip inaccessible volumes
+                Logger::warning(
+                    "Skipping volume while building content index because its filesystem metadata could not be read.",
+                    [
+                        "volumeId" => (int) ($volume->id ?? 0),
+                        "volumeHandle" => (string) ($volume->handle ?? ""),
+                        "error" => $e->getMessage(),
+                    ],
+                );
             }
         }
         $volumeIndicators = array_values(
@@ -668,6 +690,14 @@ class AssetUsageService extends Component
                 try {
                     $fieldValue = $entry->getFieldValue($field->handle);
                 } catch (\Throwable $e) {
+                    Logger::warning(
+                        "Skipping entry field while building content index because its value could not be read.",
+                        [
+                            "entryId" => (int) ($entry->id ?? 0),
+                            "fieldHandle" => (string) ($field->handle ?? ""),
+                            "error" => $e->getMessage(),
+                        ],
+                    );
                     continue;
                 }
 
@@ -1412,6 +1442,15 @@ class AssetUsageService extends Component
                 try {
                     $fieldValue = $entry->getFieldValue($field->handle);
                 } catch (\Throwable $e) {
+                    Logger::warning(
+                        "Skipping entry field while resolving asset content usage because its value could not be read.",
+                        [
+                            "assetId" => (int) ($asset->id ?? 0),
+                            "entryId" => (int) ($entry->id ?? 0),
+                            "fieldHandle" => (string) ($field->handle ?? ""),
+                            "error" => $e->getMessage(),
+                        ],
+                    );
                     continue;
                 }
 
@@ -1509,9 +1548,12 @@ class AssetUsageService extends Component
                     break;
                 }
             } catch (\Throwable $e) {
-                Craft::warning(
-                    "Error getting owner for entry: " . $e->getMessage(),
-                    __METHOD__,
+                Logger::warning(
+                    "Could not resolve owner while traversing entry usage ancestry.",
+                    [
+                        "entryId" => (int) ($current->id ?? $entry->id ?? 0),
+                        "error" => $e->getMessage(),
+                    ],
                 );
                 break;
             }
@@ -1533,9 +1575,12 @@ class AssetUsageService extends Component
         try {
             return $entry->getSection() !== null;
         } catch (\Throwable $e) {
-            Craft::warning(
-                "Error resolving section for entry: " . $e->getMessage(),
-                __METHOD__,
+            Logger::warning(
+                "Could not resolve section while evaluating entry asset usage.",
+                [
+                    "entryId" => (int) ($entry->id ?? 0),
+                    "error" => $e->getMessage(),
+                ],
             );
             return false;
         }
@@ -1552,9 +1597,12 @@ class AssetUsageService extends Component
         try {
             return $entry->getSection()?->name ?? "";
         } catch (\Throwable $e) {
-            Craft::warning(
-                "Error resolving section name for entry: " . $e->getMessage(),
-                __METHOD__,
+            Logger::warning(
+                "Could not resolve section name while building entry asset usage data.",
+                [
+                    "entryId" => (int) ($entry->id ?? 0),
+                    "error" => $e->getMessage(),
+                ],
             );
             return "";
         }

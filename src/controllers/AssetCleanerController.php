@@ -442,7 +442,14 @@ class AssetCleanerController extends Controller
                                     $folderPath = $folder->path;
                                 }
                             } catch (\Throwable $e) {
-                                // Folder might not be accessible
+                                Logger::warning(
+                                    "Could not resolve folder metadata while preparing ZIP entry.",
+                                    [
+                                        "assetId" => (int) ($asset->id ?? 0),
+                                        "filename" => (string) ($asset->filename ?? ""),
+                                        "error" => $e->getMessage(),
+                                    ],
+                                );
                             }
                             $zipEntryPath =
                                 $volumeHandle .
