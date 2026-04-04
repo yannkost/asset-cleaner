@@ -1354,128 +1354,40 @@ class AssetUsageService extends Component
      */
     private function findEntryByIdIgnoringUsagePolicy(int $sourceId): ?Entry
     {
-        $entry = Entry::find()->id($sourceId)->status(null)->one();
-        if ($entry) {
-            Logger::debug(
-                "Resolved relation source entry via direct entry lookup.",
-                [
-                    "sourceId" => $sourceId,
-                    "entryId" => (int) ($entry->id ?? 0),
-                    "canonicalId" => method_exists($entry, "getCanonicalId")
-                        ? (int) $entry->getCanonicalId()
-                        : (isset($entry->canonicalId)
-                            ? (int) $entry->canonicalId
-                            : null),
-                    "isDraft" => method_exists($entry, "getIsDraft")
-                        ? (bool) $entry->getIsDraft()
-                        : null,
-                    "isProvisionalDraft" => method_exists(
-                        $entry,
-                        "getIsProvisionalDraft",
-                    )
-                        ? (bool) $entry->getIsProvisionalDraft()
-                        : null,
-                    "isRevision" => method_exists($entry, "getIsRevision")
-                        ? (bool) $entry->getIsRevision()
-                        : null,
-                ],
-            );
+        $queryDefinitions = [
+            [
+                "label" => "direct entry",
+                "query" => $this->buildRelationSourceEntryQuery($sourceId),
+            ],
+            [
+                "label" => "saved draft",
+                "query" => $this->buildRelationSourceEntryQuery($sourceId)
+                    ->drafts()
+                    ->savedDraftsOnly(),
+            ],
+            [
+                "label" => "provisional draft",
+                "query" => $this->buildRelationSourceEntryQuery($sourceId)
+                    ->provisionalDrafts(),
+            ],
+            [
+                "label" => "revision",
+                "query" => $this->buildRelationSourceEntryQuery($sourceId)
+                    ->revisions(),
+            ],
+        ];
 
-            return $entry;
-        }
+        foreach ($queryDefinitions as $definition) {
+            $entry = $definition["query"]->one();
+            if ($entry instanceof Entry) {
+                $this->logResolvedRelationSourceEntry(
+                    (string) $definition["label"],
+                    $entry,
+                    $sourceId,
+                );
 
-        $entry = Entry::find()
-            ->id($sourceId)
-            ->drafts()
-            ->savedDraftsOnly()
-            ->one();
-        if ($entry) {
-            Logger::debug(
-                "Resolved relation source entry via saved draft lookup.",
-                [
-                    "sourceId" => $sourceId,
-                    "entryId" => (int) ($entry->id ?? 0),
-                    "canonicalId" => method_exists($entry, "getCanonicalId")
-                        ? (int) $entry->getCanonicalId()
-                        : (isset($entry->canonicalId)
-                            ? (int) $entry->canonicalId
-                            : null),
-                    "isDraft" => method_exists($entry, "getIsDraft")
-                        ? (bool) $entry->getIsDraft()
-                        : null,
-                    "isProvisionalDraft" => method_exists(
-                        $entry,
-                        "getIsProvisionalDraft",
-                    )
-                        ? (bool) $entry->getIsProvisionalDraft()
-                        : null,
-                    "isRevision" => method_exists($entry, "getIsRevision")
-                        ? (bool) $entry->getIsRevision()
-                        : null,
-                ],
-            );
-
-            return $entry;
-        }
-
-        $entry = Entry::find()->id($sourceId)->provisionalDrafts()->one();
-        if ($entry) {
-            Logger::debug(
-                "Resolved relation source entry via provisional draft lookup.",
-                [
-                    "sourceId" => $sourceId,
-                    "entryId" => (int) ($entry->id ?? 0),
-                    "canonicalId" => method_exists($entry, "getCanonicalId")
-                        ? (int) $entry->getCanonicalId()
-                        : (isset($entry->canonicalId)
-                            ? (int) $entry->canonicalId
-                            : null),
-                    "isDraft" => method_exists($entry, "getIsDraft")
-                        ? (bool) $entry->getIsDraft()
-                        : null,
-                    "isProvisionalDraft" => method_exists(
-                        $entry,
-                        "getIsProvisionalDraft",
-                    )
-                        ? (bool) $entry->getIsProvisionalDraft()
-                        : null,
-                    "isRevision" => method_exists($entry, "getIsRevision")
-                        ? (bool) $entry->getIsRevision()
-                        : null,
-                ],
-            );
-
-            return $entry;
-        }
-
-        $entry = Entry::find()->id($sourceId)->revisions()->one();
-        if ($entry) {
-            Logger::debug(
-                "Resolved relation source entry via revision lookup.",
-                [
-                    "sourceId" => $sourceId,
-                    "entryId" => (int) ($entry->id ?? 0),
-                    "canonicalId" => method_exists($entry, "getCanonicalId")
-                        ? (int) $entry->getCanonicalId()
-                        : (isset($entry->canonicalId)
-                            ? (int) $entry->canonicalId
-                            : null),
-                    "isDraft" => method_exists($entry, "getIsDraft")
-                        ? (bool) $entry->getIsDraft()
-                        : null,
-                    "isProvisionalDraft" => method_exists(
-                        $entry,
-                        "getIsProvisionalDraft",
-                    )
-                        ? (bool) $entry->getIsProvisionalDraft()
-                        : null,
-                    "isRevision" => method_exists($entry, "getIsRevision")
-                        ? (bool) $entry->getIsRevision()
-                        : null,
-                ],
-            );
-
-            return $entry;
+                return $entry;
+            }
         }
 
         Logger::debug(
@@ -1486,6 +1398,71 @@ class AssetUsageService extends Component
         );
 
         return null;
+    }
+
+    /**
+     * Build an entry query that searches broadly across sites and owner states.
+     *
+     * @param int $sourceId
+     * @return \craft\elements\db\EntryQuery
+     */
+    private function buildRelationSourceEntryQuery(
+        int $sourceId,
+    ): \craft\elements\db\EntryQuery {
+        return Entry::find()
+            ->id($sourceId)
+            ->site("*")
+            ->status(null)
+            ->allowOwnerDrafts(true)
+            ->allowOwnerRevisions(true);
+    }
+
+    /**
+     * Log how a relation source entry was resolved.
+     *
+     * @param string $lookupType
+     * @param Entry $entry
+     * @param int $sourceId
+     * @return void
+     */
+    private function logResolvedRelationSourceEntry(
+        string $lookupType,
+        Entry $entry,
+        int $sourceId,
+    ): void {
+        Logger::debug(
+            "Resolved relation source entry via {$lookupType} lookup.",
+            [
+                "sourceId" => $sourceId,
+                "entryId" => (int) ($entry->id ?? 0),
+                "canonicalId" => method_exists($entry, "getCanonicalId")
+                    ? (int) $entry->getCanonicalId()
+                    : (isset($entry->canonicalId)
+                        ? (int) $entry->canonicalId
+                        : null),
+                "isDraft" => method_exists($entry, "getIsDraft")
+                    ? (bool) $entry->getIsDraft()
+                    : null,
+                "isProvisionalDraft" => method_exists(
+                    $entry,
+                    "getIsProvisionalDraft",
+                )
+                    ? (bool) $entry->getIsProvisionalDraft()
+                    : null,
+                "isRevision" => method_exists($entry, "getIsRevision")
+                    ? (bool) $entry->getIsRevision()
+                    : null,
+                "primaryOwnerId" => isset($entry->primaryOwnerId)
+                    ? (int) $entry->primaryOwnerId
+                    : null,
+                "ownerId" => isset($entry->ownerId)
+                    ? (int) $entry->ownerId
+                    : null,
+                "siteId" => isset($entry->siteId)
+                    ? (int) $entry->siteId
+                    : null,
+            ],
+        );
     }
 
     /**
