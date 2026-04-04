@@ -1254,6 +1254,25 @@ class AssetUsageService extends Component
             $includeRevisions,
         );
 
+        $elementRow = $this->fetchRelationSourceElementRow($sourceId);
+        if (
+            is_array($elementRow) &&
+            !empty($elementRow["dateDeleted"])
+        ) {
+            Logger::debug(
+                "Excluding fallback relation source because the source element is trashed.",
+                [
+                    "sourceId" => $sourceId,
+                    "dateDeleted" => $elementRow["dateDeleted"],
+                    "includeDrafts" => $resolvedIncludeDrafts,
+                    "includeRevisions" => $resolvedIncludeRevisions,
+                    "initiatingUserId" => $initiatingUserId,
+                ],
+            );
+
+            return false;
+        }
+
         $entry = $this->resolveRelationSourceEntryIgnoringUsagePolicy(
             $sourceId,
             $initiatingUserId,
@@ -1338,11 +1357,163 @@ class AssetUsageService extends Component
             $sourceId,
             $initiatingUserId,
         );
-        if ($element === null) {
-            return null;
+        if ($element !== null) {
+            $entry = $this->extractEntryFromRelationSourceElement($element);
+            if ($entry instanceof Entry) {
+                return $entry;
+            }
         }
 
-        return $this->extractEntryFromRelationSourceElement($element);
+        return $this->resolveRelationSourceEntryFromRawAncestry($sourceId);
+    }
+
+    /**
+     * Resolve a relation source to an entry by walking canonical and owner
+     * ancestry directly from the database when normal element lookups fail.
+     *
+     * @param int $sourceId
+     * @return Entry|null
+     */
+    private function resolveRelationSourceEntryFromRawAncestry(
+        int $sourceId,
+    ): ?Entry {
+        $pendingIds = [$sourceId => true];
+        $visitedIds = [];
+        $depth = 0;
+        $maxDepth = 10;
+
+        while (!empty($pendingIds) && $depth < $maxDepth) {
+            $nextIds = [];
+
+            foreach (array_keys($pendingIds) as $candidateId) {
+                $candidateId = (int) $candidateId;
+                if ($candidateId <= 0 || isset($visitedIds[$candidateId])) {
+                    continue;
+                }
+
+                $visitedIds[$candidateId] = true;
+
+                $entry = $this->findEntryByIdIgnoringUsagePolicy($candidateId);
+                if ($entry instanceof Entry) {
+                    Logger::debug(
+                        "Resolved relation source entry via raw canonical/owner ancestry lookup.",
+                        [
+                            "sourceId" => $sourceId,
+                            "resolvedFromId" => $candidateId,
+                            "entryId" => (int) ($entry->id ?? 0),
+                            "canonicalId" => method_exists(
+                                $entry,
+                                "getCanonicalId",
+                            )
+                                ? (int) $entry->getCanonicalId()
+                                : (isset($entry->canonicalId)
+                                    ? (int) $entry->canonicalId
+                                    : null),
+                            "isDraft" => method_exists($entry, "getIsDraft")
+                                ? (bool) $entry->getIsDraft()
+                                : null,
+                            "isProvisionalDraft" => method_exists(
+                                $entry,
+                                "getIsProvisionalDraft",
+                            )
+                                ? (bool) $entry->getIsProvisionalDraft()
+                                : null,
+                            "isRevision" => method_exists(
+                                $entry,
+                                "getIsRevision",
+                            )
+                                ? (bool) $entry->getIsRevision()
+                                : null,
+                            "visitedIds" => array_map(
+                                "intval",
+                                array_keys($visitedIds),
+                            ),
+                        ],
+                    );
+
+                    return $entry;
+                }
+
+                $elementRow = $this->fetchRelationSourceElementRow($candidateId);
+                if (is_array($elementRow)) {
+                    $canonicalId = (int) ($elementRow["canonicalId"] ?? 0);
+                    if (
+                        $canonicalId > 0 &&
+                        !isset($visitedIds[$canonicalId])
+                    ) {
+                        $nextIds[$canonicalId] = true;
+                    }
+                }
+
+                foreach (
+                    $this->findRelationSourceOwnerIds($candidateId)
+                    as $ownerId
+                ) {
+                    if ($ownerId > 0 && !isset($visitedIds[$ownerId])) {
+                        $nextIds[$ownerId] = true;
+                    }
+                }
+            }
+
+            $pendingIds = $nextIds;
+            $depth++;
+        }
+
+        Logger::debug(
+            "Raw canonical/owner ancestry lookup did not resolve relation source to an entry.",
+            [
+                "sourceId" => $sourceId,
+                "visitedIds" => array_map("intval", array_keys($visitedIds)),
+            ],
+        );
+
+        return null;
+    }
+
+    /**
+     * Fetch the raw elements table row for a relation source.
+     *
+     * @param int $elementId
+     * @return array<string, mixed>|null
+     */
+    private function fetchRelationSourceElementRow(int $elementId): ?array
+    {
+        $row = (new Query())
+            ->select([
+                "id",
+                "canonicalId",
+                "draftId",
+                "revisionId",
+                "type",
+                "dateDeleted",
+            ])
+            ->from(Table::ELEMENTS)
+            ->where(["id" => $elementId])
+            ->one();
+
+        return is_array($row) ? $row : null;
+    }
+
+    /**
+     * Fetch all owner IDs for a relation source element.
+     *
+     * @param int $elementId
+     * @return array<int>
+     */
+    private function findRelationSourceOwnerIds(int $elementId): array
+    {
+        $ownerIds = (new Query())
+            ->select(["ownerId"])
+            ->from(Table::ELEMENTS_OWNERS)
+            ->where(["elementId" => $elementId])
+            ->column();
+
+        $ownerIds = array_values(
+            array_unique(array_filter(array_map("intval", $ownerIds))),
+        );
+        sort($ownerIds, SORT_NUMERIC);
+
+        return $ownerIds;
     }
 
     /**
@@ -1508,7 +1679,15 @@ class AssetUsageService extends Component
         }
 
         try {
-            $element = Craft::$app->getElements()->getElementById($sourceId);
+            $element = Craft::$app->getElements()->getElementById(
+                $sourceId,
+                null,
+                "*",
+                [
+                    "allowOwnerDrafts" => true,
+                    "allowOwnerRevisions" => true,
+                ],
+            );
             if ($element !== null) {
                 Logger::debug(
                     "Resolved relation source via generic element lookup.",
@@ -1667,6 +1846,23 @@ class AssetUsageService extends Component
         $url = "#";
         $status = "live";
         $section = Craft::t("asset-cleaner", "Relational element");
+
+        $elementRow = $this->fetchRelationSourceElementRow($sourceId);
+        if (
+            is_array($elementRow) &&
+            !empty($elementRow["dateDeleted"])
+        ) {
+            Logger::debug(
+                "Skipping generic fallback relation record because the source element is trashed.",
+                [
+                    "sourceId" => $sourceId,
+                    "dateDeleted" => $elementRow["dateDeleted"],
+                    "initiatingUserId" => $initiatingUserId,
+                ],
+            );
+
+            return null;
+        }
 
         try {
             $resolvedRelationEntry =
