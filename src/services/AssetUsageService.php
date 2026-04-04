@@ -283,6 +283,7 @@ class AssetUsageService extends Component
         Entry $entry,
         ?bool $includeDrafts = null,
         ?bool $includeRevisions = null,
+        ?int $initiatingUserId = null,
     ): ?Entry {
         $includeDrafts = $this->resolveIncludeDrafts($includeDrafts);
         $includeRevisions = $this->resolveIncludeRevisions($includeRevisions);
@@ -292,6 +293,7 @@ class AssetUsageService extends Component
                 $entry,
                 $includeDrafts,
                 $includeRevisions,
+                $initiatingUserId,
             )
         ) {
             return null;
@@ -307,6 +309,7 @@ class AssetUsageService extends Component
                 $resolvedEntry,
                 $includeDrafts,
                 $includeRevisions,
+                $initiatingUserId,
             )
         ) {
             return null;
@@ -320,12 +323,15 @@ class AssetUsageService extends Component
      *
      * @param Entry $entry
      * @param bool $includeDrafts
+     * @param bool $includeRevisions
+     * @param int|null $initiatingUserId
      * @return bool
      */
     private function shouldIncludeEntryForUsage(
         Entry $entry,
         bool $includeDrafts,
         bool $includeRevisions,
+        ?int $initiatingUserId = null,
     ): bool {
         if (
             !$includeRevisions &&
@@ -335,20 +341,74 @@ class AssetUsageService extends Component
             return false;
         }
 
-        if (!$includeDrafts) {
-            if (method_exists($entry, "getIsDraft") && $entry->getIsDraft()) {
+        if (
+            method_exists($entry, "getIsProvisionalDraft") &&
+            $entry->getIsProvisionalDraft()
+        ) {
+            if (!$includeDrafts) {
                 return false;
             }
 
+            $resolvedDraftCreatorUserId = $this->resolveDraftCreatorUserId(
+                $initiatingUserId,
+            );
+            $entryDraftCreatorUserId = $this->getDraftCreatorUserIdForEntry(
+                $entry,
+            );
+
             if (
-                method_exists($entry, "getIsProvisionalDraft") &&
-                $entry->getIsProvisionalDraft()
+                $resolvedDraftCreatorUserId !== null &&
+                $entryDraftCreatorUserId !== null &&
+                $entryDraftCreatorUserId !== $resolvedDraftCreatorUserId
             ) {
+                return false;
+            }
+
+            return true;
+        }
+
+        if (!$includeDrafts) {
+            if (method_exists($entry, "getIsDraft") && $entry->getIsDraft()) {
                 return false;
             }
         }
 
         return true;
+    }
+
+    /**
+     * Resolve the draft creator user ID for an entry when available.
+     *
+     * @param Entry $entry
+     * @return int|null
+     */
+    private function getDraftCreatorUserIdForEntry(Entry $entry): ?int
+    {
+        try {
+            if (method_exists($entry, "getDraftCreatorId")) {
+                $draftCreatorId = $entry->getDraftCreatorId();
+                return is_numeric($draftCreatorId)
+                    ? (int) $draftCreatorId
+                    : null;
+            }
+
+            if (
+                isset($entry->draftCreatorId) &&
+                is_numeric($entry->draftCreatorId)
+            ) {
+                return (int) $entry->draftCreatorId;
+            }
+        } catch (\Throwable $e) {
+            Logger::warning(
+                "Could not resolve draft creator while evaluating entry asset usage.",
+                [
+                    "entryId" => (int) ($entry->id ?? 0),
+                    "error" => $e->getMessage(),
+                ],
+            );
+        }
+
+        return null;
     }
 
     /**
@@ -917,8 +977,10 @@ class AssetUsageService extends Component
     /**
      * Determine whether an asset has any valid relation usage.
      *
-     * In fallback mode, any relation row counts as usage. In strict mode,
-     * relation rows must resolve back to a meaningful source context.
+     * In fallback mode, any qualifying relation row counts as usage. Entry
+     * sources must still honor the configured draft and revision inclusion
+     * rules. In strict mode, relation rows must resolve back to a meaningful
+     * source context.
      *
      * @param int $assetId
      * @return bool
@@ -944,7 +1006,9 @@ class AssetUsageService extends Component
     /**
      * Resolve relation usage for a batch of asset IDs.
      *
-     * In fallback mode, any relation row counts as usage. In strict mode,
+     * In fallback mode, any qualifying relation row counts as usage. Entry
+     * sources still honor the configured draft and revision rules, while
+     * generic non-entry sources continue to count as usage. In strict mode,
      * relation rows must resolve back to a meaningful source context while
      * honoring the configured draft and revision rules.
      *
@@ -967,7 +1031,12 @@ class AssetUsageService extends Component
         }
 
         if ($this->resolveCountAllRelationsAsUsage($countAllRelationsAsUsage)) {
-            return $this->getAnyRelationUsageIds($assetIds);
+            return $this->getFallbackRelationUsageIds(
+                $assetIds,
+                $includeDrafts,
+                $includeRevisions,
+                $initiatingUserId,
+            );
         }
 
         $relations = (new Query())
@@ -1058,6 +1127,17 @@ class AssetUsageService extends Component
                     continue;
                 }
 
+                if (
+                    !$this->sourceCountsForFallbackRelationUsage(
+                        $sourceId,
+                        $includeDrafts,
+                        $includeRevisions,
+                        $initiatingUserId,
+                    )
+                ) {
+                    continue;
+                }
+
                 $resolvedEntry = $this->resolveRelationSourceEntry(
                     $sourceId,
                     $includeDrafts,
@@ -1068,7 +1148,10 @@ class AssetUsageService extends Component
                     continue;
                 }
 
-                $record = $this->getGenericRelationUsageRecord($sourceId);
+                $record = $this->getGenericRelationUsageRecord(
+                    $sourceId,
+                    $initiatingUserId,
+                );
                 if ($record !== null) {
                     $genericRecords["generic-" . $sourceId] = $record;
                 }
@@ -1094,33 +1177,271 @@ class AssetUsageService extends Component
     }
 
     /**
-     * Get used asset IDs from any raw relation row.
+     * Get used asset IDs from fallback relation usage while still honoring the
+     * draft and revision inclusion rules for entry sources.
      *
      * @param array<int> $assetIds
+     * @param bool|null $includeDrafts
+     * @param bool|null $includeRevisions
+     * @param int|null $initiatingUserId
      * @return array<int>
      */
-    private function getAnyRelationUsageIds(array $assetIds): array
+    private function getFallbackRelationUsageIds(
+        array $assetIds,
+        ?bool $includeDrafts = null,
+        ?bool $includeRevisions = null,
+        ?int $initiatingUserId = null,
+    ): array {
+        $relations = (new Query())
+            ->select(["r.targetId", "r.sourceId"])
+            ->from(["r" => Table::RELATIONS])
+            ->where(["r.targetId" => $assetIds])
+            ->all();
+
+        $usedAssetIds = [];
+        $sourceUsageCache = [];
+
+        foreach ($relations as $relation) {
+            $sourceId = (int) ($relation["sourceId"] ?? 0);
+            $targetId = (int) ($relation["targetId"] ?? 0);
+
+            if ($sourceId <= 0 || $targetId <= 0) {
+                continue;
+            }
+
+            if (!array_key_exists($sourceId, $sourceUsageCache)) {
+                $sourceUsageCache[
+                    $sourceId
+                ] = $this->sourceCountsForFallbackRelationUsage(
+                    $sourceId,
+                    $includeDrafts,
+                    $includeRevisions,
+                    $initiatingUserId,
+                );
+            }
+
+            if ($sourceUsageCache[$sourceId]) {
+                $usedAssetIds[$targetId] = true;
+            }
+        }
+
+        $result = array_map("intval", array_keys($usedAssetIds));
+        sort($result, SORT_NUMERIC);
+
+        return $result;
+    }
+
+    /**
+     * Determine whether a fallback relation source should count as usage.
+     *
+     * Generic non-entry element sources always count. Entry sources must still
+     * honor the draft and revision inclusion rules.
+     *
+     * @param int $sourceId
+     * @param bool|null $includeDrafts
+     * @param bool|null $includeRevisions
+     * @param int|null $initiatingUserId
+     * @return bool
+     */
+    private function sourceCountsForFallbackRelationUsage(
+        int $sourceId,
+        ?bool $includeDrafts = null,
+        ?bool $includeRevisions = null,
+        ?int $initiatingUserId = null,
+    ): bool {
+        $entry = $this->resolveRelationSourceEntryIgnoringUsagePolicy(
+            $sourceId,
+            $initiatingUserId,
+        );
+        if (!$entry) {
+            return true;
+        }
+
+        return $this->resolveUsageEntry(
+            $entry,
+            $includeDrafts,
+            $includeRevisions,
+            $initiatingUserId,
+        ) instanceof Entry;
+    }
+
+    /**
+     * Resolve one relation source to an entry regardless of whether draft and
+     * revision usage is currently enabled.
+     *
+     * This is used to determine whether a fallback relation source ultimately
+     * belongs to an entry (directly or through owners) before applying the
+     * configured draft and revision policy.
+     *
+     * @param int $sourceId
+     * @param int|null $initiatingUserId
+     * @return Entry|null
+     */
+    private function resolveRelationSourceEntryIgnoringUsagePolicy(
+        int $sourceId,
+        ?int $initiatingUserId = null,
+    ): ?Entry {
+        $element = $this->findRelationSourceElementById(
+            $sourceId,
+            $initiatingUserId,
+        );
+        if ($element === null) {
+            return null;
+        }
+
+        return $this->extractEntryFromRelationSourceElement($element);
+    }
+
+    /**
+     * Find an entry by element ID regardless of whether draft and revision
+     * usage is currently enabled.
+     *
+     * @param int $sourceId
+     * @return Entry|null
+     */
+    private function findEntryByIdIgnoringUsagePolicy(int $sourceId): ?Entry
     {
-        $ids = (new Query())
-            ->select(["targetId"])
-            ->distinct()
-            ->from(Table::RELATIONS)
-            ->where(["targetId" => $assetIds])
-            ->column();
+        $entry = Entry::find()->id($sourceId)->status(null)->one();
+        if ($entry) {
+            return $entry;
+        }
 
-        $ids = array_map("intval", $ids);
-        sort($ids, SORT_NUMERIC);
+        $entry = Entry::find()
+            ->id($sourceId)
+            ->drafts()
+            ->savedDraftsOnly()
+            ->one();
+        if ($entry) {
+            return $entry;
+        }
 
-        return $ids;
+        $entry = Entry::find()->id($sourceId)->provisionalDrafts()->one();
+        if ($entry) {
+            return $entry;
+        }
+
+        return Entry::find()->id($sourceId)->revisions()->one();
+    }
+
+    /**
+     * Resolve one raw relation source element by ID.
+     *
+     * @param int $sourceId
+     * @param int|null $initiatingUserId
+     * @return mixed
+     */
+    private function findRelationSourceElementById(
+        int $sourceId,
+        ?int $initiatingUserId = null,
+    ): mixed {
+        $entry = $this->findEntryByIdIgnoringUsagePolicy($sourceId);
+        if ($entry instanceof Entry) {
+            return $entry;
+        }
+
+        try {
+            $element = Craft::$app->getElements()->getElementById($sourceId);
+            if ($element !== null) {
+                return $element;
+            }
+        } catch (\Throwable $e) {
+            Logger::warning(
+                "Could not resolve relation source element by ID.",
+                [
+                    "sourceId" => $sourceId,
+                    "error" => $e->getMessage(),
+                ],
+            );
+        }
+
+        return $this->findEntryByIdIgnoringUsagePolicy($sourceId);
+    }
+
+    /**
+     * Resolve an entry from a relation source by traversing owner chains.
+     *
+     * @param mixed $element
+     * @return Entry|null
+     */
+    private function extractEntryFromRelationSourceElement(mixed $element): ?Entry
+    {
+        $current = $element;
+        $visitedObjectIds = [];
+        $depth = 0;
+        $maxDepth = 10;
+
+        while ($current !== null && $depth < $maxDepth) {
+            if ($current instanceof Entry) {
+                $entryId = (int) ($current->id ?? 0);
+                if ($entryId > 0) {
+                    return $this->findEntryByIdIgnoringUsagePolicy($entryId) ??
+                        $current;
+                }
+
+                return $current;
+            }
+
+            if (!is_object($current)) {
+                return null;
+            }
+
+            $objectId = spl_object_id($current);
+            if (isset($visitedObjectIds[$objectId])) {
+                return null;
+            }
+            $visitedObjectIds[$objectId] = true;
+
+            if (!method_exists($current, "getOwner")) {
+                return null;
+            }
+
+            try {
+                $owner = $current->getOwner();
+            } catch (\Throwable $e) {
+                Logger::warning(
+                    "Could not resolve relation source owner while traversing usage ancestry.",
+                    [
+                        "elementId" => (int) ($current->id ?? 0),
+                        "elementType" => get_class($current),
+                        "error" => $e->getMessage(),
+                    ],
+                );
+
+                return null;
+            }
+
+            if ($owner === null || $owner === $current) {
+                return null;
+            }
+
+            if ($owner instanceof Entry) {
+                $ownerId = (int) ($owner->id ?? 0);
+                if ($ownerId > 0) {
+                    return $this->findEntryByIdIgnoringUsagePolicy($ownerId) ??
+                        $owner;
+                }
+
+                return $owner;
+            }
+
+            $current = $owner;
+            $depth++;
+        }
+
+        return $current instanceof Entry ? $current : null;
     }
 
     /**
      * Build a generic relation usage record for non-entry or unresolved sources.
      *
      * @param int $sourceId
+     * @param int|null $initiatingUserId
      * @return array<string, mixed>|null
      */
-    private function getGenericRelationUsageRecord(int $sourceId): ?array
+    private function getGenericRelationUsageRecord(
+        int $sourceId,
+        ?int $initiatingUserId = null,
+    ): ?array
     {
         $title = Craft::t("asset-cleaner", "Relational source #{id}", [
             "id" => $sourceId,
@@ -1130,7 +1451,19 @@ class AssetUsageService extends Component
         $section = Craft::t("asset-cleaner", "Relational element");
 
         try {
-            $element = Craft::$app->getElements()->getElementById($sourceId);
+            if (
+                $this->resolveRelationSourceEntryIgnoringUsagePolicy(
+                    $sourceId,
+                    $initiatingUserId,
+                ) instanceof Entry
+            ) {
+                return null;
+            }
+
+            $element = $this->findRelationSourceElementById(
+                $sourceId,
+                $initiatingUserId,
+            );
 
             if ($element instanceof Entry) {
                 return null;
@@ -1230,10 +1563,8 @@ class AssetUsageService extends Component
         ?bool $includeRevisions = null,
         ?int $initiatingUserId = null,
     ): ?Entry {
-        $entry = $this->findEntryByIdForUsage(
+        $entry = $this->resolveRelationSourceEntryIgnoringUsagePolicy(
             $sourceId,
-            $includeDrafts,
-            $includeRevisions,
             $initiatingUserId,
         );
         if (!$entry) {
@@ -1244,8 +1575,11 @@ class AssetUsageService extends Component
             $entry,
             $includeDrafts,
             $includeRevisions,
+            $initiatingUserId,
         );
     }
+
+
 
     /**
      * Find an entry by element ID for usage resolution, optionally including
@@ -1433,6 +1767,7 @@ class AssetUsageService extends Component
                 $entry,
                 $includeDrafts,
                 $includeRevisions,
+                $initiatingUserId,
             );
             if (!$resolvedEntry) {
                 continue;

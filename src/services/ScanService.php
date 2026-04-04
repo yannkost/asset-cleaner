@@ -582,6 +582,7 @@ class ScanService extends Component
                     $entry,
                     $includeDrafts,
                     $includeRevisions,
+                    $initiatingUserId,
                 );
 
                 if ($resolvedEntry === null) {
@@ -1573,21 +1574,13 @@ class ScanService extends Component
             return;
         }
 
-        if ($countAllRelationsAsUsage) {
-            $relationIds = (new Query())
-                ->select(["targetId"])
-                ->distinct()
-                ->from(Table::RELATIONS)
-                ->where(["targetId" => $assetIds])
-                ->column();
-        } else {
-            $relationIds = Plugin::getInstance()->assetUsage->getResolvedRelationUsageIds(
-                $assetIds,
-                $includeDrafts,
-                $includeRevisions,
-                $initiatingUserId,
-            );
-        }
+        $relationIds = Plugin::getInstance()->assetUsage->getResolvedRelationUsageIds(
+            $assetIds,
+            $includeDrafts,
+            $includeRevisions,
+            $initiatingUserId,
+            $countAllRelationsAsUsage,
+        );
 
         foreach ($relationIds as $relationId) {
             $usedIds[(int) $relationId] = true;
