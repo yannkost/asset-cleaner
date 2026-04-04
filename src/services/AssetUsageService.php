@@ -1042,7 +1042,14 @@ class AssetUsageService extends Component
         $relations = (new Query())
             ->select(["r.targetId", "r.sourceId"])
             ->from(["r" => Table::RELATIONS])
-            ->where(["r.targetId" => $assetIds])
+            ->innerJoin(
+                ["sourceElements" => Table::ELEMENTS],
+                "[[sourceElements.id]] = [[r.sourceId]]",
+            )
+            ->where([
+                "r.targetId" => $assetIds,
+                "sourceElements.dateDeleted" => null,
+            ])
             ->all();
 
         $usedAssetIds = [];
@@ -1099,7 +1106,14 @@ class AssetUsageService extends Component
         $relations = (new Query())
             ->select(["r.sourceId"])
             ->from(["r" => Table::RELATIONS])
-            ->where(["r.targetId" => $assetId])
+            ->innerJoin(
+                ["sourceElements" => Table::ELEMENTS],
+                "[[sourceElements.id]] = [[r.sourceId]]",
+            )
+            ->where([
+                "r.targetId" => $assetId,
+                "sourceElements.dateDeleted" => null,
+            ])
             ->column();
 
         foreach (
@@ -1264,7 +1278,14 @@ class AssetUsageService extends Component
         $relations = (new Query())
             ->select(["r.targetId", "r.sourceId"])
             ->from(["r" => Table::RELATIONS])
-            ->where(["r.targetId" => $assetIds])
+            ->innerJoin(
+                ["sourceElements" => Table::ELEMENTS],
+                "[[sourceElements.id]] = [[r.sourceId]]",
+            )
+            ->where([
+                "r.targetId" => $assetIds,
+                "sourceElements.dateDeleted" => null,
+            ])
             ->all();
 
         $usedAssetIds = [];
@@ -2059,7 +2080,14 @@ class AssetUsageService extends Component
         $relations = (new Query())
             ->select(["r.sourceId"])
             ->from(["r" => Table::RELATIONS])
-            ->where(["r.targetId" => $assetId])
+            ->innerJoin(
+                ["sourceElements" => Table::ELEMENTS],
+                "[[sourceElements.id]] = [[r.sourceId]]",
+            )
+            ->where([
+                "r.targetId" => $assetId,
+                "sourceElements.dateDeleted" => null,
+            ])
             ->column();
 
         $entries = [];
