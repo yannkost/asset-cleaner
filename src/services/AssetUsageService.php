@@ -1249,20 +1249,73 @@ class AssetUsageService extends Component
         ?bool $includeRevisions = null,
         ?int $initiatingUserId = null,
     ): bool {
+        $resolvedIncludeDrafts = $this->resolveIncludeDrafts($includeDrafts);
+        $resolvedIncludeRevisions = $this->resolveIncludeRevisions(
+            $includeRevisions,
+        );
+
         $entry = $this->resolveRelationSourceEntryIgnoringUsagePolicy(
             $sourceId,
             $initiatingUserId,
         );
         if (!$entry) {
+            Logger::debug(
+                "Fallback relation source counts as generic usage because it could not be resolved to an entry ancestry.",
+                [
+                    "sourceId" => $sourceId,
+                    "includeDrafts" => $resolvedIncludeDrafts,
+                    "includeRevisions" => $resolvedIncludeRevisions,
+                    "initiatingUserId" => $initiatingUserId,
+                ],
+            );
+
             return true;
         }
 
-        return $this->resolveUsageEntry(
+        $resolvedUsageEntry = $this->resolveUsageEntry(
             $entry,
             $includeDrafts,
             $includeRevisions,
             $initiatingUserId,
-        ) instanceof Entry;
+        );
+
+        Logger::debug(
+            "Evaluated fallback relation source against draft and revision usage policy.",
+            [
+                "sourceId" => $sourceId,
+                "resolvedEntryId" => (int) ($entry->id ?? 0),
+                "resolvedEntryCanonicalId" => method_exists(
+                    $entry,
+                    "getCanonicalId",
+                )
+                    ? (int) $entry->getCanonicalId()
+                    : (isset($entry->canonicalId)
+                        ? (int) $entry->canonicalId
+                        : null),
+                "resolvedEntryType" => get_class($entry),
+                "isDraft" => method_exists($entry, "getIsDraft")
+                    ? (bool) $entry->getIsDraft()
+                    : null,
+                "isProvisionalDraft" => method_exists(
+                    $entry,
+                    "getIsProvisionalDraft",
+                )
+                    ? (bool) $entry->getIsProvisionalDraft()
+                    : null,
+                "isRevision" => method_exists($entry, "getIsRevision")
+                    ? (bool) $entry->getIsRevision()
+                    : null,
+                "includeDrafts" => $resolvedIncludeDrafts,
+                "includeRevisions" => $resolvedIncludeRevisions,
+                "initiatingUserId" => $initiatingUserId,
+                "countsAsUsage" => $resolvedUsageEntry instanceof Entry,
+                "usageEntryId" => $resolvedUsageEntry instanceof Entry
+                    ? (int) ($resolvedUsageEntry->id ?? 0)
+                    : null,
+            ],
+        );
+
+        return $resolvedUsageEntry instanceof Entry;
     }
 
     /**
@@ -1303,6 +1356,31 @@ class AssetUsageService extends Component
     {
         $entry = Entry::find()->id($sourceId)->status(null)->one();
         if ($entry) {
+            Logger::debug(
+                "Resolved relation source entry via direct entry lookup.",
+                [
+                    "sourceId" => $sourceId,
+                    "entryId" => (int) ($entry->id ?? 0),
+                    "canonicalId" => method_exists($entry, "getCanonicalId")
+                        ? (int) $entry->getCanonicalId()
+                        : (isset($entry->canonicalId)
+                            ? (int) $entry->canonicalId
+                            : null),
+                    "isDraft" => method_exists($entry, "getIsDraft")
+                        ? (bool) $entry->getIsDraft()
+                        : null,
+                    "isProvisionalDraft" => method_exists(
+                        $entry,
+                        "getIsProvisionalDraft",
+                    )
+                        ? (bool) $entry->getIsProvisionalDraft()
+                        : null,
+                    "isRevision" => method_exists($entry, "getIsRevision")
+                        ? (bool) $entry->getIsRevision()
+                        : null,
+                ],
+            );
+
             return $entry;
         }
 
@@ -1312,15 +1390,102 @@ class AssetUsageService extends Component
             ->savedDraftsOnly()
             ->one();
         if ($entry) {
+            Logger::debug(
+                "Resolved relation source entry via saved draft lookup.",
+                [
+                    "sourceId" => $sourceId,
+                    "entryId" => (int) ($entry->id ?? 0),
+                    "canonicalId" => method_exists($entry, "getCanonicalId")
+                        ? (int) $entry->getCanonicalId()
+                        : (isset($entry->canonicalId)
+                            ? (int) $entry->canonicalId
+                            : null),
+                    "isDraft" => method_exists($entry, "getIsDraft")
+                        ? (bool) $entry->getIsDraft()
+                        : null,
+                    "isProvisionalDraft" => method_exists(
+                        $entry,
+                        "getIsProvisionalDraft",
+                    )
+                        ? (bool) $entry->getIsProvisionalDraft()
+                        : null,
+                    "isRevision" => method_exists($entry, "getIsRevision")
+                        ? (bool) $entry->getIsRevision()
+                        : null,
+                ],
+            );
+
             return $entry;
         }
 
         $entry = Entry::find()->id($sourceId)->provisionalDrafts()->one();
         if ($entry) {
+            Logger::debug(
+                "Resolved relation source entry via provisional draft lookup.",
+                [
+                    "sourceId" => $sourceId,
+                    "entryId" => (int) ($entry->id ?? 0),
+                    "canonicalId" => method_exists($entry, "getCanonicalId")
+                        ? (int) $entry->getCanonicalId()
+                        : (isset($entry->canonicalId)
+                            ? (int) $entry->canonicalId
+                            : null),
+                    "isDraft" => method_exists($entry, "getIsDraft")
+                        ? (bool) $entry->getIsDraft()
+                        : null,
+                    "isProvisionalDraft" => method_exists(
+                        $entry,
+                        "getIsProvisionalDraft",
+                    )
+                        ? (bool) $entry->getIsProvisionalDraft()
+                        : null,
+                    "isRevision" => method_exists($entry, "getIsRevision")
+                        ? (bool) $entry->getIsRevision()
+                        : null,
+                ],
+            );
+
             return $entry;
         }
 
-        return Entry::find()->id($sourceId)->revisions()->one();
+        $entry = Entry::find()->id($sourceId)->revisions()->one();
+        if ($entry) {
+            Logger::debug(
+                "Resolved relation source entry via revision lookup.",
+                [
+                    "sourceId" => $sourceId,
+                    "entryId" => (int) ($entry->id ?? 0),
+                    "canonicalId" => method_exists($entry, "getCanonicalId")
+                        ? (int) $entry->getCanonicalId()
+                        : (isset($entry->canonicalId)
+                            ? (int) $entry->canonicalId
+                            : null),
+                    "isDraft" => method_exists($entry, "getIsDraft")
+                        ? (bool) $entry->getIsDraft()
+                        : null,
+                    "isProvisionalDraft" => method_exists(
+                        $entry,
+                        "getIsProvisionalDraft",
+                    )
+                        ? (bool) $entry->getIsProvisionalDraft()
+                        : null,
+                    "isRevision" => method_exists($entry, "getIsRevision")
+                        ? (bool) $entry->getIsRevision()
+                        : null,
+                ],
+            );
+
+            return $entry;
+        }
+
+        Logger::debug(
+            "Relation source entry lookup did not resolve to any direct, draft, provisional draft, or revision entry.",
+            [
+                "sourceId" => $sourceId,
+            ],
+        );
+
+        return null;
     }
 
     /**
@@ -1336,12 +1501,48 @@ class AssetUsageService extends Component
     ): mixed {
         $entry = $this->findEntryByIdIgnoringUsagePolicy($sourceId);
         if ($entry instanceof Entry) {
+            Logger::debug(
+                "Resolved relation source directly via entry queries before generic element lookup.",
+                [
+                    "sourceId" => $sourceId,
+                    "entryId" => (int) ($entry->id ?? 0),
+                    "canonicalId" => method_exists($entry, "getCanonicalId")
+                        ? (int) $entry->getCanonicalId()
+                        : (isset($entry->canonicalId)
+                            ? (int) $entry->canonicalId
+                            : null),
+                    "isDraft" => method_exists($entry, "getIsDraft")
+                        ? (bool) $entry->getIsDraft()
+                        : null,
+                    "isProvisionalDraft" => method_exists(
+                        $entry,
+                        "getIsProvisionalDraft",
+                    )
+                        ? (bool) $entry->getIsProvisionalDraft()
+                        : null,
+                    "isRevision" => method_exists($entry, "getIsRevision")
+                        ? (bool) $entry->getIsRevision()
+                        : null,
+                    "initiatingUserId" => $initiatingUserId,
+                ],
+            );
+
             return $entry;
         }
 
         try {
             $element = Craft::$app->getElements()->getElementById($sourceId);
             if ($element !== null) {
+                Logger::debug(
+                    "Resolved relation source via generic element lookup.",
+                    [
+                        "sourceId" => $sourceId,
+                        "elementId" => (int) ($element->id ?? 0),
+                        "elementType" => get_class($element),
+                        "initiatingUserId" => $initiatingUserId,
+                    ],
+                );
+
                 return $element;
             }
         } catch (\Throwable $e) {
@@ -1354,7 +1555,47 @@ class AssetUsageService extends Component
             );
         }
 
-        return $this->findEntryByIdIgnoringUsagePolicy($sourceId);
+        $fallbackEntry = $this->findEntryByIdIgnoringUsagePolicy($sourceId);
+        if ($fallbackEntry instanceof Entry) {
+            Logger::debug(
+                "Resolved relation source via fallback entry lookup after generic element lookup.",
+                [
+                    "sourceId" => $sourceId,
+                    "entryId" => (int) ($fallbackEntry->id ?? 0),
+                    "canonicalId" => method_exists(
+                        $fallbackEntry,
+                        "getCanonicalId",
+                    )
+                        ? (int) $fallbackEntry->getCanonicalId()
+                        : (isset($fallbackEntry->canonicalId)
+                            ? (int) $fallbackEntry->canonicalId
+                            : null),
+                    "isDraft" => method_exists($fallbackEntry, "getIsDraft")
+                        ? (bool) $fallbackEntry->getIsDraft()
+                        : null,
+                    "isProvisionalDraft" => method_exists(
+                        $fallbackEntry,
+                        "getIsProvisionalDraft",
+                    )
+                        ? (bool) $fallbackEntry->getIsProvisionalDraft()
+                        : null,
+                    "isRevision" => method_exists($fallbackEntry, "getIsRevision")
+                        ? (bool) $fallbackEntry->getIsRevision()
+                        : null,
+                    "initiatingUserId" => $initiatingUserId,
+                ],
+            );
+        } else {
+            Logger::debug(
+                "Relation source could not be resolved by either entry or generic element lookup.",
+                [
+                    "sourceId" => $sourceId,
+                    "initiatingUserId" => $initiatingUserId,
+                ],
+            );
+        }
+
+        return $fallbackEntry;
     }
 
     /**
@@ -1451,12 +1692,48 @@ class AssetUsageService extends Component
         $section = Craft::t("asset-cleaner", "Relational element");
 
         try {
-            if (
+            $resolvedRelationEntry =
                 $this->resolveRelationSourceEntryIgnoringUsagePolicy(
                     $sourceId,
                     $initiatingUserId,
-                ) instanceof Entry
-            ) {
+                );
+
+            if ($resolvedRelationEntry instanceof Entry) {
+                Logger::debug(
+                    "Skipping generic fallback relation record because the source resolves to an entry ancestry.",
+                    [
+                        "sourceId" => $sourceId,
+                        "resolvedEntryId" => (int) ($resolvedRelationEntry->id ?? 0),
+                        "canonicalId" => method_exists(
+                            $resolvedRelationEntry,
+                            "getCanonicalId",
+                        )
+                            ? (int) $resolvedRelationEntry->getCanonicalId()
+                            : (isset($resolvedRelationEntry->canonicalId)
+                                ? (int) $resolvedRelationEntry->canonicalId
+                                : null),
+                        "isDraft" => method_exists(
+                            $resolvedRelationEntry,
+                            "getIsDraft",
+                        )
+                            ? (bool) $resolvedRelationEntry->getIsDraft()
+                            : null,
+                        "isProvisionalDraft" => method_exists(
+                            $resolvedRelationEntry,
+                            "getIsProvisionalDraft",
+                        )
+                            ? (bool) $resolvedRelationEntry->getIsProvisionalDraft()
+                            : null,
+                        "isRevision" => method_exists(
+                            $resolvedRelationEntry,
+                            "getIsRevision",
+                        )
+                            ? (bool) $resolvedRelationEntry->getIsRevision()
+                            : null,
+                        "initiatingUserId" => $initiatingUserId,
+                    ],
+                );
+
                 return null;
             }
 
@@ -1466,6 +1743,15 @@ class AssetUsageService extends Component
             );
 
             if ($element instanceof Entry) {
+                Logger::debug(
+                    "Skipping generic fallback relation record because the source resolves directly to an entry.",
+                    [
+                        "sourceId" => $sourceId,
+                        "elementId" => (int) ($element->id ?? 0),
+                        "initiatingUserId" => $initiatingUserId,
+                    ],
+                );
+
                 return null;
             }
 
