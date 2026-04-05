@@ -91,6 +91,7 @@ class DbScanStore implements ScanStoreInterface
                 $normalizedVolumeIds,
                 $initiatingUserId,
                 $countAllRelationsAsUsage,
+                0,
             ),
             "includeDrafts" => $includeDrafts ? 1 : 0,
             "assetChunkSize" => max(1, $assetChunkSize),
@@ -364,6 +365,66 @@ class DbScanStore implements ScanStoreInterface
     /**
      * @inheritdoc
      */
+    public function getAssetSnapshotChunk(
+        string $scanId,
+        int $chunkIndex,
+    ): array {
+        if ($chunkIndex < 0) {
+            return [];
+        }
+
+        $meta = $this->getMeta($scanId);
+        $chunkSize = max(
+            1,
+            (int) ($meta["assetChunkSize"] ?? 100),
+        );
+        $offset = $chunkIndex * $chunkSize;
+
+        $rows = (new Query())
+            ->from(self::TABLE_SCAN_ASSETS)
+            ->where(["scanId" => $scanId])
+            ->orderBy(["assetId" => SORT_ASC])
+            ->offset($offset)
+            ->limit($chunkSize)
+            ->all($this->db());
+
+        if (empty($rows)) {
+            return [];
+        }
+
+        return array_map(
+            fn(array $row): array => $this->normalizeAssetSnapshotRow($row),
+            $rows,
+        );
+    }
+
+    /**
+     * @inheritdoc
+     */
+    public function resetUsedIdsByPrefix(
+        string $scanId,
+        string $sourcePrefix,
+    ): void {
+        if (!$this->tableExists(self::TABLE_SCAN_USED_ASSETS)) {
+            return;
+        }
+
+        $this->db()
+            ->createCommand()
+            ->delete(
+                self::TABLE_SCAN_USED_ASSETS,
+                [
+                    "and",
+                    ["scanId" => $scanId],
+                    ["like", "source", $sourcePrefix . "%", false],
+                ],
+            )
+            ->execute();
+    }
+
+    /**
+     * @inheritdoc
+     */
     public function replaceUsedIds(
         string $scanId,
         string $source,
@@ -601,6 +662,9 @@ class DbScanStore implements ScanStoreInterface
             )
                 ? (bool) $volumeIdsPayload["countAllRelationsAsUsage"]
                 : true,
+            "relationOffset" => isset($volumeIdsPayload["relationOffset"])
+                ? max(0, (int) $volumeIdsPayload["relationOffset"])
+                : 0,
             "includeDrafts" => !empty($row["includeDrafts"]),
             "includeRevisions" => array_key_exists("includeRevisions", $row)
                 ? !empty($row["includeRevisions"])
@@ -642,6 +706,9 @@ class DbScanStore implements ScanStoreInterface
                 array_key_exists("countAllRelationsAsUsage", $meta)
                     ? (bool) $meta["countAllRelationsAsUsage"]
                     : true,
+                isset($meta["relationOffset"])
+                    ? max(0, (int) $meta["relationOffset"])
+                    : 0,
             ),
             "includeDrafts" => !empty($meta["includeDrafts"]) ? 1 : 0,
             "assetChunkSize" => max(1, (int) ($meta["assetChunkSize"] ?? 100)),
@@ -721,12 +788,14 @@ class DbScanStore implements ScanStoreInterface
      * @param array<int> $volumeIds
      * @param int|null $initiatingUserId
      * @param bool $countAllRelationsAsUsage
+     * @param int $relationOffset
      * @return string
      */
     private function encodeVolumeIdsPayload(
         array $volumeIds,
         ?int $initiatingUserId,
         bool $countAllRelationsAsUsage = true,
+        int $relationOffset = 0,
     ): string {
         return Json::encode([
             "ids" => array_values(
@@ -734,6 +803,7 @@ class DbScanStore implements ScanStoreInterface
             ),
             "initiatingUserId" => $initiatingUserId,
             "countAllRelationsAsUsage" => $countAllRelationsAsUsage,
+            "relationOffset" => max(0, $relationOffset),
         ]);
     }
 
@@ -743,7 +813,7 @@ class DbScanStore implements ScanStoreInterface
      * Supports both the new object payload and the legacy plain array payload.
      *
      * @param mixed $value
-     * @return array{ids: array<int>, initiatingUserId: int|null, includeRevisions: bool, countAllRelationsAsUsage: bool}
+     * @return array{ids: array<int>, initiatingUserId: int|null, includeRevisions: bool, countAllRelationsAsUsage: bool, relationOffset: int}
      */
     private function decodeVolumeIdsPayload(mixed $value): array
     {
@@ -764,6 +834,9 @@ class DbScanStore implements ScanStoreInterface
                 )
                     ? (bool) $decoded["countAllRelationsAsUsage"]
                     : true,
+                "relationOffset" => isset($decoded["relationOffset"])
+                    ? max(0, (int) $decoded["relationOffset"])
+                    : 0,
             ];
         }
 
@@ -772,6 +845,7 @@ class DbScanStore implements ScanStoreInterface
             "initiatingUserId" => null,
             "includeRevisions" => false,
             "countAllRelationsAsUsage" => true,
+            "relationOffset" => 0,
         ];
     }
 

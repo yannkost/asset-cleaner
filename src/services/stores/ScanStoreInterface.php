@@ -159,6 +159,37 @@ interface ScanStoreInterface
     public function iterateAssetSnapshot(string $scanId): iterable;
 
     /**
+     * Read one stored asset snapshot chunk for the scan.
+     *
+     * Implementations should return the exact chunk previously written with
+     * `storeAssetSnapshotChunk()`, or an empty array when the chunk does not
+     * exist.
+     *
+     * @param string $scanId
+     * @param int $chunkIndex
+     * @return array<int, array<string, mixed>>
+     */
+    public function getAssetSnapshotChunk(
+        string $scanId,
+        int $chunkIndex,
+    ): array;
+
+    /**
+     * Remove stored used asset IDs for all sources with the given prefix.
+     *
+     * This is useful for staged scans that persist one logical source across
+     * multiple batch-specific source keys such as `relations-000001`.
+     *
+     * @param string $scanId
+     * @param string $sourcePrefix
+     * @return void
+     */
+    public function resetUsedIdsByPrefix(
+        string $scanId,
+        string $sourcePrefix,
+    ): void;
+
+    /**
      * Replace the stored used asset IDs for one source.
      *
      * Source values are expected to be things like `relations`, `content`,

@@ -9,6 +9,7 @@ use craft\base\Component;
 use craft\db\Query;
 use craft\db\Table;
 use craft\elements\Entry;
+use craft\elements\User;
 use craft\elements\db\EntryQuery;
 use yann\assetcleaner\helpers\Logger;
 
@@ -80,50 +81,57 @@ class RelationUsageResolver extends Component
         }
 
         if ($this->resolveCountAllRelationsAsUsage($countAllRelationsAsUsage)) {
-            return $this->getFallbackRelationUsageIds(
-                $assetIds,
-                $includeDrafts,
-                $includeRevisions,
-                $initiatingUserId,
-            );
-        }
-
-        $relations = (new Query())
-            ->select(["r.targetId", "r.sourceId"])
-            ->from(["r" => Table::RELATIONS])
-            ->innerJoin(
-                ["sourceElements" => Table::ELEMENTS],
-                "[[sourceElements.id]] = [[r.sourceId]]",
-            )
-            ->where([
-                "r.targetId" => $assetIds,
-                "sourceElements.dateDeleted" => null,
-            ])
-            ->all();
-
-        $usedAssetIds = [];
-        $resolvedSourceCache = [];
-
-        foreach ($relations as $relation) {
-            $sourceId = (int) ($relation["sourceId"] ?? 0);
-            $targetId = (int) ($relation["targetId"] ?? 0);
-
-            if ($sourceId <= 0 || $targetId <= 0) {
-                continue;
-            }
-
-            if (!array_key_exists($sourceId, $resolvedSourceCache)) {
-                $resolvedSourceCache[$sourceId] = $this->resolveRelationSourceEntry(
-                    $sourceId,
+            $usedAssetIds = array_fill_keys(
+                $this->getFallbackRelationUsageIds(
+                    $assetIds,
                     $includeDrafts,
                     $includeRevisions,
                     $initiatingUserId,
-                );
-            }
+                ),
+                true,
+            );
+        } else {
+            $relations = (new Query())
+                ->select(["r.targetId", "r.sourceId"])
+                ->from(["r" => Table::RELATIONS])
+                ->innerJoin(
+                    ["sourceElements" => Table::ELEMENTS],
+                    "[[sourceElements.id]] = [[r.sourceId]]",
+                )
+                ->where([
+                    "r.targetId" => $assetIds,
+                    "sourceElements.dateDeleted" => null,
+                ])
+                ->all();
 
-            if ($resolvedSourceCache[$sourceId] instanceof Entry) {
-                $usedAssetIds[$targetId] = true;
+            $usedAssetIds = [];
+            $resolvedSourceCache = [];
+
+            foreach ($relations as $relation) {
+                $sourceId = (int) ($relation["sourceId"] ?? 0);
+                $targetId = (int) ($relation["targetId"] ?? 0);
+
+                if ($sourceId <= 0 || $targetId <= 0) {
+                    continue;
+                }
+
+                if (!array_key_exists($sourceId, $resolvedSourceCache)) {
+                    $resolvedSourceCache[$sourceId] = $this->resolveRelationSourceEntry(
+                        $sourceId,
+                        $includeDrafts,
+                        $includeRevisions,
+                        $initiatingUserId,
+                    );
+                }
+
+                if ($resolvedSourceCache[$sourceId] instanceof Entry) {
+                    $usedAssetIds[$targetId] = true;
+                }
             }
+        }
+
+        foreach ($this->getUserPhotoUsageIds($assetIds) as $userPhotoAssetId) {
+            $usedAssetIds[(int) $userPhotoAssetId] = true;
         }
 
         $result = array_map("intval", array_keys($usedAssetIds));
@@ -222,10 +230,121 @@ class RelationUsageResolver extends Component
             }
         }
 
+        foreach ($this->getUserPhotoUsageRecords($assetId) as $record) {
+            $genericRecords[
+                "user-photo-" . (int) ($record["id"] ?? 0)
+            ] = $record;
+        }
+
         return [
             "entryRelations" => array_values($entryRecords),
             "genericRelations" => array_values($genericRecords),
         ];
+    }
+
+    /**
+     * Resolve asset usage from the users table photoId column.
+     *
+     * @param array<int> $assetIds
+     * @return array<int>
+     */
+    private function getUserPhotoUsageIds(array $assetIds): array
+    {
+        $assetIds = array_values(
+            array_unique(array_filter(array_map("intval", $assetIds))),
+        );
+
+        if (empty($assetIds)) {
+            return [];
+        }
+
+        $usedAssetIds = (new Query())
+            ->select(["u.photoId"])
+            ->distinct()
+            ->from(["u" => "{{%users}}"])
+            ->innerJoin(
+                ["userElements" => Table::ELEMENTS],
+                "[[userElements.id]] = [[u.id]]",
+            )
+            ->where([
+                "u.photoId" => $assetIds,
+                "userElements.dateDeleted" => null,
+            ])
+            ->column();
+
+        $usedAssetIds = array_values(
+            array_unique(array_filter(array_map("intval", $usedAssetIds))),
+        );
+        sort($usedAssetIds, SORT_NUMERIC);
+
+        return $usedAssetIds;
+    }
+
+    /**
+     * Build usage records for users whose photoId references the asset.
+     *
+     * @param int $assetId
+     * @return array<int, array<string, mixed>>
+     */
+    private function getUserPhotoUsageRecords(int $assetId): array
+    {
+        $userIds = (new Query())
+            ->select(["u.id"])
+            ->distinct()
+            ->from(["u" => "{{%users}}"])
+            ->innerJoin(
+                ["userElements" => Table::ELEMENTS],
+                "[[userElements.id]] = [[u.id]]",
+            )
+            ->where([
+                "u.photoId" => $assetId,
+                "userElements.dateDeleted" => null,
+            ])
+            ->column();
+
+        $userIds = array_values(
+            array_unique(array_filter(array_map("intval", $userIds))),
+        );
+
+        if (empty($userIds)) {
+            return [];
+        }
+
+        $records = [];
+        foreach (User::find()->id($userIds)->status(null)->all() as $user) {
+            $title = trim((string) ($user->fullName ?? ""));
+            if ($title === "") {
+                $title = trim((string) ($user->username ?? ""));
+            }
+            if ($title === "") {
+                $title = trim((string) ($user->email ?? ""));
+            }
+            if ($title === "") {
+                $title = Craft::t("asset-cleaner", "User #{id}", [
+                    "id" => (int) ($user->id ?? 0),
+                ]);
+            }
+
+            $records[] = [
+                "id" => (int) ($user->id ?? 0),
+                "title" => $title,
+                "url" =>
+                    method_exists($user, "getCpEditUrl") &&
+                    is_string($user->getCpEditUrl()) &&
+                    $user->getCpEditUrl() !== ""
+                        ? $user->getCpEditUrl()
+                        : "#",
+                "status" =>
+                    method_exists($user, "getStatus") &&
+                    is_string($user->getStatus()) &&
+                    $user->getStatus() !== ""
+                        ? $user->getStatus()
+                        : "live",
+                "section" => Craft::t("asset-cleaner", "User"),
+            ];
+        }
+
+        return $records;
     }
 
     /**

@@ -144,6 +144,7 @@ class FileScanStore extends Component implements ScanStoreInterface
             "includeDrafts" => $includeDrafts,
             "includeRevisions" => $includeRevisions,
             "countAllRelationsAsUsage" => $countAllRelationsAsUsage,
+            "relationOffset" => 0,
             "status" => ScanService::STATUS_PENDING,
             "stage" => ScanService::STAGE_SETUP,
             "totalAssets" => 0,
@@ -391,6 +392,76 @@ class FileScanStore extends Component implements ScanStoreInterface
                 if (is_array($row)) {
                     yield $row;
                 }
+            }
+        }
+    }
+
+    /**
+     * @inheritdoc
+     */
+    public function getAssetSnapshotChunk(
+        string $scanId,
+        int $chunkIndex,
+    ): array {
+        if ($chunkIndex < 0) {
+            return [];
+        }
+
+        $path =
+            $this->getAssetsDirectory($scanId) .
+            DIRECTORY_SEPARATOR .
+            sprintf("chunk-%06d.ndjson", $chunkIndex + 1);
+
+        if (!is_file($path)) {
+            return [];
+        }
+
+        $rows = [];
+        foreach ($this->iterateNdjsonFile($path) as $row) {
+            if (is_array($row)) {
+                $rows[] = $row;
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @inheritdoc
+     */
+    public function resetUsedIdsByPrefix(
+        string $scanId,
+        string $sourcePrefix,
+    ): void {
+        $directory = $this->getUsedDirectory($scanId);
+        if (!is_dir($directory)) {
+            return;
+        }
+
+        $pattern = $directory . DIRECTORY_SEPARATOR . $sourcePrefix . "*.txt";
+        $files = glob($pattern) ?: [];
+        sort($files, SORT_NATURAL);
+
+        foreach ($files as $path) {
+            if (!is_file($path)) {
+                continue;
+            }
+
+            if (!@unlink($path)) {
+                $error = error_get_last();
+                $this->logStorageFailure(
+                    "Unable to remove used asset ID file while resetting staged sources.",
+                    [
+                        "scanId" => $scanId,
+                        "sourcePrefix" => $sourcePrefix,
+                        "path" => $path,
+                        "unlinkError" =>
+                            $error["message"] ?? "Unknown unlink error.",
+                    ],
+                );
+                throw new Exception(
+                    "Unable to remove used asset ID file '{$path}' while resetting staged sources.",
+                );
             }
         }
     }
