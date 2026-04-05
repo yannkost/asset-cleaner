@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2] - 2026-04-05
+
+### Changed
+- Improved the asset usage modal so draft and revision usage can be identified directly from the displayed entry links
+- Renamed user photo usage labels in the usage modal to "User profile picture" for clearer presentation
+
+### Fixed
+- Split large relation scans into resumable queue batches so high-volume scans are less likely to exceed worker timeouts
+- Hardened relation scan progress tracking so stale queued relation batches are less likely to overwrite later-stage scan state
+- Fixed the scan progress display so the asset counter advances during long-running scans instead of remaining at `0`
+- Counted asset references from the `users.photoId` column as usage during scans and usage checks
+
 ## [1.3.1] - 2026-04-04
 
 ### Changed

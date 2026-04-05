@@ -223,15 +223,11 @@
 
                 html += escapeHtml(entry.title || entry.label || "Relation");
 
-                if (entry.section) {
+                const usageContextLabel = getUsageContextLabel(entry);
+                if (usageContextLabel) {
                     html +=
                         '<span class="section-name">(' +
-                        escapeHtml(entry.section) +
-                        ")</span>";
-                } else if (entry.sourceType) {
-                    html +=
-                        '<span class="section-name">(' +
-                        escapeHtml(entry.sourceType) +
+                        escapeHtml(usageContextLabel) +
                         ")</span>";
                 }
 
@@ -261,15 +257,11 @@
 
                 html += escapeHtml(entry.title || entry.label || "Relation");
 
-                if (entry.section) {
+                const usageContextLabel = getUsageContextLabel(entry);
+                if (usageContextLabel) {
                     html +=
                         '<span class="section-name">(' +
-                        escapeHtml(entry.section) +
-                        ")</span>";
-                } else if (entry.sourceType) {
-                    html +=
-                        '<span class="section-name">(' +
-                        escapeHtml(entry.sourceType) +
+                        escapeHtml(usageContextLabel) +
                         ")</span>";
                 }
 
@@ -291,9 +283,13 @@
                 html += '<a href="' + entry.url + '" target="_blank">';
                 html += '<span class="status ' + entry.status + '"></span>';
                 html += escapeHtml(entry.title);
+                const contentUsageContextLabel = getUsageContextLabel(entry);
+                const contentUsageLabel = contentUsageContextLabel
+                    ? entry.field + " — " + contentUsageContextLabel
+                    : entry.field;
                 html +=
                     '<span class="field-name">(' +
-                    escapeHtml(entry.field) +
+                    escapeHtml(contentUsageLabel) +
                     ")</span>";
                 html += "</a></li>";
             });
@@ -301,6 +297,58 @@
         }
 
         container.innerHTML = html;
+    }
+
+    function getUsageContextLabel(entry) {
+        const baseLabel =
+            entry && entry.section
+                ? entry.section === "User"
+                    ? "User profile picture"
+                    : entry.section
+                : entry && entry.sourceType
+                  ? entry.sourceType
+                  : "";
+
+        const usageStateLabel = getUsageStateLabelFromUrl(
+            entry && entry.url ? entry.url : "",
+        );
+
+        if (baseLabel && usageStateLabel) {
+            return baseLabel + ", " + usageStateLabel;
+        }
+
+        return baseLabel || usageStateLabel || "";
+    }
+
+    function getUsageStateLabelFromUrl(url) {
+        if (!url) {
+            return "";
+        }
+
+        try {
+            const parsedUrl = new URL(url, window.location.origin);
+            const draftId = parsedUrl.searchParams.get("draftId");
+            if (draftId) {
+                return "draft #" + draftId;
+            }
+
+            const revisionId = parsedUrl.searchParams.get("revisionId");
+            if (revisionId) {
+                return "revision #" + revisionId;
+            }
+        } catch (e) {
+            const draftMatch = String(url).match(/[?&]draftId=(\d+)/);
+            if (draftMatch) {
+                return "draft #" + draftMatch[1];
+            }
+
+            const revisionMatch = String(url).match(/[?&]revisionId=(\d+)/);
+            if (revisionMatch) {
+                return "revision #" + revisionMatch[1];
+            }
+        }
+
+        return "";
     }
 
     // ========================================

@@ -340,7 +340,10 @@ class RelationUsageResolver extends Component
                     $user->getStatus() !== ""
                         ? $user->getStatus()
                         : "live",
-                "section" => Craft::t("asset-cleaner", "User"),
+                "section" => Craft::t(
+                    "asset-cleaner",
+                    "User profile picture",
+                ),
             ];
         }
 
