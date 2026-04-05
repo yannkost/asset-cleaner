@@ -39,6 +39,7 @@ class ScanService extends Component
     private const DEFAULT_ASSET_CHUNK_SIZE = 100;
     private const DEFAULT_ENTRY_BATCH_SIZE = 200;
     private const DEFAULT_RESULT_QUERY_CHUNK_SIZE = 250;
+    private const DEFAULT_RELATION_BATCH_SIZE = 2000;
 
     /**
      * @var array<string, ScanStoreInterface>
@@ -289,6 +290,7 @@ class ScanService extends Component
             "stage" => self::STAGE_SETUP,
             "totalAssets" => $totalAssets,
             "totalChunks" => $chunkCount,
+            "relationOffset" => 0,
             "processedAssets" => 0,
             "usedCount" => 0,
             "unusedCount" => 0,
@@ -324,6 +326,7 @@ class ScanService extends Component
                 "stage" => self::STAGE_FINALIZE,
                 "completedAt" => $completedAt,
                 "totalAssets" => 0,
+                "relationOffset" => 0,
                 "processedAssets" => 0,
                 "usedCount" => 0,
                 "unusedCount" => 0,
@@ -379,7 +382,12 @@ class ScanService extends Component
             1,
             (int) ($meta["assetChunkSize"] ?? self::DEFAULT_ASSET_CHUNK_SIZE),
         );
-        $totalChunks = max(1, (int) ($meta["totalChunks"] ?? 1));
+        $relationBatchSize = max($chunkSize, self::DEFAULT_RELATION_BATCH_SIZE);
+        $totalAssets = max(0, (int) ($meta["totalAssets"] ?? 0));
+        $totalBatches = max(
+            1,
+            (int) ceil(max(1, $totalAssets) / $relationBatchSize),
+        );
         $includeDrafts = !empty($meta["includeDrafts"]);
         $includeRevisions = !empty($meta["includeRevisions"]);
         $countAllRelationsAsUsage = array_key_exists(
@@ -394,7 +402,7 @@ class ScanService extends Component
 
         $usedIds = [];
         $currentAssetIds = [];
-        $chunkIndex = 0;
+        $batchIndex = 0;
 
         $store->replaceUsedIds($scanId, "relations", []);
 
@@ -405,7 +413,7 @@ class ScanService extends Component
 
             $currentAssetIds[] = (int) $row["id"];
 
-            if (count($currentAssetIds) >= $chunkSize) {
+            if (count($currentAssetIds) >= $relationBatchSize) {
                 $this->collectRelationChunk(
                     $currentAssetIds,
                     $usedIds,
@@ -414,12 +422,22 @@ class ScanService extends Component
                     $countAllRelationsAsUsage,
                     $initiatingUserId,
                 );
-                $ratio = ++$chunkIndex / $totalChunks;
+
+                $progress = $this->scaleProgress(
+                    ++$batchIndex / $totalBatches,
+                    10,
+                    25,
+                );
 
                 $store->updateProgress($scanId, [
                     "status" => self::STATUS_RUNNING,
                     "stage" => self::STAGE_RELATIONS,
-                    "progress" => $this->scaleProgress($ratio, 10, 25),
+                    "progress" => $progress,
+                    "totalAssets" => $totalAssets,
+                    "processedAssets" => $this->estimateProcessedAssetsForProgress(
+                        $totalAssets,
+                        $progress,
+                    ),
                     "usedCount" => count($usedIds),
                 ]);
 
@@ -436,12 +454,22 @@ class ScanService extends Component
                 $countAllRelationsAsUsage,
                 $initiatingUserId,
             );
-            $ratio = ++$chunkIndex / $totalChunks;
+
+            $progress = $this->scaleProgress(
+                ++$batchIndex / $totalBatches,
+                10,
+                25,
+            );
 
             $store->updateProgress($scanId, [
                 "status" => self::STATUS_RUNNING,
                 "stage" => self::STAGE_RELATIONS,
-                "progress" => $this->scaleProgress($ratio, 10, 25),
+                "progress" => $progress,
+                "totalAssets" => $totalAssets,
+                "processedAssets" => $this->estimateProcessedAssetsForProgress(
+                    $totalAssets,
+                    $progress,
+                ),
                 "usedCount" => count($usedIds),
             ]);
         }
@@ -461,6 +489,11 @@ class ScanService extends Component
             "status" => self::STATUS_RUNNING,
             "stage" => self::STAGE_RELATIONS,
             "progress" => 25,
+            "totalAssets" => $totalAssets,
+            "processedAssets" => $this->estimateProcessedAssetsForProgress(
+                $totalAssets,
+                25,
+            ),
             "usedCount" => count($uniqueIds),
         ]);
 
@@ -497,6 +530,7 @@ class ScanService extends Component
         $initiatingUserId = isset($meta["initiatingUserId"])
             ? (int) $meta["initiatingUserId"]
             : null;
+        $totalAssets = max(0, (int) ($meta["totalAssets"] ?? 0));
 
         $lookups = $this->buildAssetLookups($scanId);
         $scannedIds = $lookups["scannedIds"];
@@ -517,6 +551,11 @@ class ScanService extends Component
                 "status" => self::STATUS_RUNNING,
                 "stage" => self::STAGE_CONTENT,
                 "progress" => 75,
+                "totalAssets" => $totalAssets,
+                "processedAssets" => $this->estimateProcessedAssetsForProgress(
+                    $totalAssets,
+                    75,
+                ),
             ]);
 
             return 0;
@@ -548,6 +587,11 @@ class ScanService extends Component
             "status" => self::STATUS_RUNNING,
             "stage" => self::STAGE_CONTENT,
             "progress" => 25,
+            "totalAssets" => $totalAssets,
+            "processedAssets" => $this->estimateProcessedAssetsForProgress(
+                $totalAssets,
+                25,
+            ),
         ]);
 
         if ($totalEntries > 0) {
@@ -595,11 +639,17 @@ class ScanService extends Component
                             $totalEntries > 0
                                 ? $processedEntries / $totalEntries
                                 : 1.0;
+                        $progress = $this->scaleProgress($ratio, 25, 70);
 
                         $store->updateProgress($scanId, [
                             "status" => self::STATUS_RUNNING,
                             "stage" => self::STAGE_CONTENT,
-                            "progress" => $this->scaleProgress($ratio, 25, 70),
+                            "progress" => $progress,
+                            "totalAssets" => $totalAssets,
+                            "processedAssets" => $this->estimateProcessedAssetsForProgress(
+                                $totalAssets,
+                                $progress,
+                            ),
                             "usedCount" => count($usedIds),
                         ]);
                     }
@@ -649,11 +699,17 @@ class ScanService extends Component
                         $totalEntries > 0
                             ? $processedEntries / $totalEntries
                             : 1.0;
+                    $progress = $this->scaleProgress($ratio, 25, 70);
 
                     $store->updateProgress($scanId, [
                         "status" => self::STATUS_RUNNING,
                         "stage" => self::STAGE_CONTENT,
-                        "progress" => $this->scaleProgress($ratio, 25, 70),
+                        "progress" => $progress,
+                        "totalAssets" => $totalAssets,
+                        "processedAssets" => $this->estimateProcessedAssetsForProgress(
+                            $totalAssets,
+                            $progress,
+                        ),
                         "usedCount" => count($usedIds),
                     ]);
                 }
@@ -725,6 +781,11 @@ class ScanService extends Component
             "status" => self::STATUS_RUNNING,
             "stage" => self::STAGE_CONTENT,
             "progress" => 75,
+            "totalAssets" => $totalAssets,
+            "processedAssets" => $this->estimateProcessedAssetsForProgress(
+                $totalAssets,
+                75,
+            ),
             "usedCount" => count($uniqueIds),
         ]);
 
@@ -786,12 +847,16 @@ class ScanService extends Component
             ) {
                 $ratio =
                     $totalAssets > 0 ? $processedAssets / $totalAssets : 1.0;
+                $progress = $this->scaleProgress($ratio, 75, 95);
 
                 $store->updateProgress($scanId, [
                     "status" => self::STATUS_RUNNING,
                     "stage" => self::STAGE_FINALIZE,
-                    "progress" => $this->scaleProgress($ratio, 75, 95),
-                    "processedAssets" => $processedAssets,
+                    "progress" => $progress,
+                    "processedAssets" => $this->estimateProcessedAssetsForProgress(
+                        $totalAssets,
+                        $progress,
+                    ),
                     "usedCount" => count($usedIds),
                     "unusedCount" => count($unusedIds),
                 ]);
@@ -1624,6 +1689,340 @@ class ScanService extends Component
                 array_filter($variants, static fn($value) => $value !== ""),
             ),
         );
+    }
+
+    /**
+     * Estimate the UI-facing processed asset counter from overall progress.
+     *
+     * @param int $totalAssets
+     * @param int|float $progress
+     * @return int
+     */
+    private function estimateProcessedAssetsForProgress(
+        int $totalAssets,
+        int|float $progress,
+    ): int {
+        if ($totalAssets <= 0) {
+            return 0;
+        }
+
+        $progress = max(0.0, min(100.0, (float) $progress));
+
+        return min(
+            $totalAssets,
+            (int) floor(($progress / 100) * $totalAssets),
+        );
+    }
+
+    /**
+     * Determine whether the scan can still accept relation-stage progress
+     * updates without clobbering a later stage.
+     *
+     * @param string $scanId
+     * @return bool
+     */
+    private function canPersistRelationStageWrites(string $scanId): bool
+    {
+        $meta = $this->getStore()->getMeta($scanId);
+        if ($meta === null) {
+            return false;
+        }
+
+        $status = (string) ($meta["status"] ?? "");
+        $stage = (string) ($meta["stage"] ?? "");
+
+        if (
+            in_array($status, [self::STATUS_COMPLETE, self::STATUS_FAILED], true)
+        ) {
+            return false;
+        }
+
+        return in_array(
+            $stage,
+            [self::STAGE_SETUP, self::STAGE_RELATIONS],
+            true,
+        );
+    }
+
+    /**
+     * Collect one resumable batch of relation usage.
+     *
+     * This is intended for large scans where processing all relation lookups in
+     * a single queue execution can exceed the worker timeout.
+     *
+     * @param string $scanId
+     * @param int $processedAssets
+     * @param int|null $batchSize
+     * @return array{
+     *     processedAssets:int,
+     *     totalAssets:int,
+     *     progress:int,
+     *     usedCount:int,
+     *     stale:bool,
+     *     completed:bool
+     * }
+     */
+    public function collectRelationsUsageBatch(
+        string $scanId,
+        int $processedAssets = 0,
+        ?int $batchSize = null,
+    ): array {
+        $store = $this->getStore();
+        $meta = $store->getMeta($scanId);
+
+        if ($meta === null) {
+            Logger::warning(
+                "Skipping resumable relations batch because scan metadata could not be loaded.",
+                [
+                    "scanId" => $scanId,
+                    "storageMode" => $this->getStorageMode(),
+                ],
+            );
+
+            return [
+                "processedAssets" => 0,
+                "totalAssets" => 0,
+                "progress" => 25,
+                "usedCount" => 0,
+                "stale" => false,
+                "completed" => true,
+            ];
+        }
+
+        $chunkSize = max(
+            1,
+            (int) ($meta["assetChunkSize"] ?? self::DEFAULT_ASSET_CHUNK_SIZE),
+        );
+        $relationBatchSize = max(
+            $chunkSize,
+            (int) ($batchSize ?? self::DEFAULT_RELATION_BATCH_SIZE),
+        );
+        $totalAssets = max(0, (int) ($meta["totalAssets"] ?? 0));
+        $batchOffset = max(0, min($processedAssets, $totalAssets));
+        $expectedRelationOffset = max(0, (int) ($meta["relationOffset"] ?? 0));
+        $includeDrafts = !empty($meta["includeDrafts"]);
+        $includeRevisions = !empty($meta["includeRevisions"]);
+        $countAllRelationsAsUsage = array_key_exists(
+            "countAllRelationsAsUsage",
+            $meta,
+        )
+            ? !empty($meta["countAllRelationsAsUsage"])
+            : true;
+        $initiatingUserId = isset($meta["initiatingUserId"])
+            ? (int) $meta["initiatingUserId"]
+            : null;
+
+        if (!$this->canPersistRelationStageWrites($scanId)) {
+            return [
+                "processedAssets" => $totalAssets,
+                "totalAssets" => $totalAssets,
+                "progress" => (int) ($meta["progress"] ?? 25),
+                "usedCount" => (int) ($meta["usedCount"] ?? 0),
+                "stale" => true,
+                "completed" => true,
+            ];
+        }
+
+        if ($batchOffset !== $expectedRelationOffset) {
+            return [
+                "processedAssets" => $expectedRelationOffset,
+                "totalAssets" => $totalAssets,
+                "progress" => (int) ($meta["progress"] ?? 25),
+                "usedCount" => (int) ($meta["usedCount"] ?? 0),
+                "stale" => true,
+                "completed" => $expectedRelationOffset >= $totalAssets,
+            ];
+        }
+
+        if ($batchOffset === 0) {
+            $store->resetUsedIdsByPrefix($scanId, "relations");
+        }
+
+        $assetIds = $this->getAssetSnapshotBatchAssetIds(
+            $scanId,
+            $batchOffset,
+            $relationBatchSize,
+            $chunkSize,
+        );
+
+        if (empty($assetIds)) {
+            if ($batchOffset < $totalAssets) {
+                throw new \RuntimeException(
+                    "Asset snapshot batch could not be loaded while resuming relation scanning.",
+                );
+            }
+
+            $usedCount = count($store->getMergedUsedIds($scanId));
+            $displayProcessedAssets = $this->estimateProcessedAssetsForProgress(
+                $totalAssets,
+                25,
+            );
+
+            $canPersistRelationStageWrites = $this->canPersistRelationStageWrites(
+                $scanId,
+            );
+
+            if ($canPersistRelationStageWrites) {
+                $store->updateMeta($scanId, [
+                    "status" => self::STATUS_RUNNING,
+                    "stage" => self::STAGE_CONTENT,
+                    "totalAssets" => $totalAssets,
+                    "relationOffset" => $totalAssets,
+                    "processedAssets" => $displayProcessedAssets,
+                    "usedCount" => $usedCount,
+                ]);
+
+                $store->updateProgress($scanId, [
+                    "status" => self::STATUS_RUNNING,
+                    "stage" => self::STAGE_CONTENT,
+                    "progress" => 25,
+                    "totalAssets" => $totalAssets,
+                    "processedAssets" => $displayProcessedAssets,
+                    "usedCount" => $usedCount,
+                ]);
+            }
+
+            return [
+                "processedAssets" => $totalAssets,
+                "totalAssets" => $totalAssets,
+                "progress" => 25,
+                "usedCount" => $usedCount,
+                "stale" => false,
+                "completed" => true,
+            ];
+        }
+
+        $currentMeta = $store->getMeta($scanId);
+        $currentRelationOffset = max(
+            0,
+            (int) ($currentMeta["relationOffset"] ?? 0),
+        );
+        if ($currentRelationOffset !== $batchOffset) {
+            return [
+                "processedAssets" => $currentRelationOffset,
+                "totalAssets" => $totalAssets,
+                "progress" => (int) ($currentMeta["progress"] ?? 25),
+                "usedCount" => (int) ($currentMeta["usedCount"] ?? 0),
+                "stale" => true,
+                "completed" => $currentRelationOffset >= $totalAssets,
+            ];
+        }
+
+        $usedIds = [];
+        $this->collectRelationChunk(
+            $assetIds,
+            $usedIds,
+            $includeDrafts,
+            $includeRevisions,
+            $countAllRelationsAsUsage,
+            $initiatingUserId,
+        );
+
+        $processedAssets = min(
+            $totalAssets,
+            $batchOffset + count($assetIds),
+        );
+
+        $batchNumber = (int) floor($batchOffset / $relationBatchSize);
+        $store->replaceUsedIds(
+            $scanId,
+            sprintf("relations-%06d", $batchNumber + 1),
+            array_map("intval", array_keys($usedIds)),
+        );
+
+        $ratio = $totalAssets > 0 ? $processedAssets / $totalAssets : 1.0;
+        $progress = $this->scaleProgress($ratio, 10, 25);
+        $usedCount = count($store->getMergedUsedIds($scanId));
+        $displayProcessedAssets = $this->estimateProcessedAssetsForProgress(
+            $totalAssets,
+            $progress,
+        );
+
+        if ($this->canPersistRelationStageWrites($scanId)) {
+            $store->updateMeta($scanId, [
+                "status" => self::STATUS_RUNNING,
+                "stage" => self::STAGE_RELATIONS,
+                "totalAssets" => $totalAssets,
+                "relationOffset" => $processedAssets,
+                "processedAssets" => $displayProcessedAssets,
+                "usedCount" => $usedCount,
+            ]);
+
+            if ($this->canPersistRelationStageWrites($scanId)) {
+                $store->updateProgress($scanId, [
+                    "status" => self::STATUS_RUNNING,
+                    "stage" => self::STAGE_RELATIONS,
+                    "progress" => $progress,
+                    "totalAssets" => $totalAssets,
+                    "processedAssets" => $displayProcessedAssets,
+                    "usedCount" => $usedCount,
+                ]);
+            }
+        }
+
+        return [
+            "processedAssets" => $processedAssets,
+            "totalAssets" => $totalAssets,
+            "progress" => $progress,
+            "usedCount" => $usedCount,
+            "stale" => false,
+            "completed" => $processedAssets >= $totalAssets,
+        ];
+    }
+
+    /**
+     * Read one window of asset IDs from the stored snapshot.
+     *
+     * @param string $scanId
+     * @param int $offset
+     * @param int $limit
+     * @return array<int>
+     */
+    private function getAssetSnapshotBatchAssetIds(
+        string $scanId,
+        int $offset,
+        int $limit,
+        int $chunkSize,
+    ): array {
+        if ($limit <= 0 || $chunkSize <= 0) {
+            return [];
+        }
+
+        $assetIds = [];
+        $startChunkIndex = (int) floor($offset / $chunkSize);
+        $offsetWithinChunk = $offset % $chunkSize;
+        $currentChunkIndex = $startChunkIndex;
+
+        while (count($assetIds) < $limit) {
+            $rows = $this->getStore()->getAssetSnapshotChunk(
+                $scanId,
+                $currentChunkIndex,
+            );
+
+            if (empty($rows)) {
+                break;
+            }
+
+            $rowOffset = $currentChunkIndex === $startChunkIndex
+                ? $offsetWithinChunk
+                : 0;
+
+            foreach (array_slice($rows, $rowOffset) as $row) {
+                if (!is_array($row) || !isset($row["id"])) {
+                    continue;
+                }
+
+                $assetIds[] = (int) $row["id"];
+
+                if (count($assetIds) >= $limit) {
+                    break 2;
+                }
+            }
+
+            $currentChunkIndex++;
+        }
+
+        return $assetIds;
     }
 
     /**
