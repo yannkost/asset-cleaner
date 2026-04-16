@@ -4,6 +4,13 @@
     <div class="asset-cleaner-form">
         <h2>{{ 'Select Volumes'|t('asset-cleaner') }}</h2>
 
+        <div class="volume-master-toggle">
+            <label>
+                <input type="checkbox" class="volume-master-checkbox" checked>
+                {{ 'Select All'|t('asset-cleaner') }}
+            </label>
+        </div>
+
         <div class="volume-checkboxes">
             {% for volume in volumes %}
                 <div class="checkbox-wrapper">

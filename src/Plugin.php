@@ -253,6 +253,10 @@ class Plugin extends BasePlugin
                                 "asset-cleaner",
                                 "Select All",
                             ),
+                            "noVolumesSelected" => Craft::t(
+                                "asset-cleaner",
+                                "No volumes selected.",
+                            ),
                             "colTitle" => Craft::t("asset-cleaner", "Title"),
                             "colFilename" => Craft::t(
                                 "asset-cleaner",
