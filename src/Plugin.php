@@ -253,6 +253,10 @@ class Plugin extends BasePlugin
                                 "asset-cleaner",
                                 "Select All",
                             ),
+                            "selectAtLeastOneVolume" => Craft::t(
+                                "asset-cleaner",
+                                "Select at least one volume.",
+                            ),
                             "colTitle" => Craft::t("asset-cleaner", "Title"),
                             "colFilename" => Craft::t(
                                 "asset-cleaner",
