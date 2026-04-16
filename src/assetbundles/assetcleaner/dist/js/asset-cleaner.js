@@ -356,34 +356,74 @@
     // ========================================
 
     function getSelectedVolumes(container) {
-        const volumeIds = [];
-        const volumeNames = {};
+        try {
+            const volumeIds = [];
+            const volumeNames = {};
 
-        if (!container) {
+            if (!container) {
+                return { volumeIds: volumeIds, volumeNames: volumeNames };
+            }
+
+            container
+                .querySelectorAll(
+                    '.volume-checkboxes input[type="checkbox"][name="volumeIds[]"]:checked',
+                )
+                .forEach(function (cb) {
+                    volumeIds.push(cb.value);
+
+                    const wrapper = cb.closest(".checkbox-wrapper");
+                    const label = wrapper
+                        ? wrapper.querySelector("label")
+                        : null;
+                    volumeNames[cb.value] = label
+                        ? label.textContent.trim()
+                        : "Volume " + cb.value;
+                });
+
             return { volumeIds: volumeIds, volumeNames: volumeNames };
+        } catch (error) {
+            reportUtilityUiError(error);
+            return { volumeIds: [], volumeNames: {} };
+        }
+    }
+
+    function getUtilityMessage(key, fallback) {
+        if (t && t[key]) {
+            return t[key];
         }
 
-        container
-            .querySelectorAll(
-                '.volume-checkboxes input[type="checkbox"][name="volumeIds[]"]:checked',
-            )
-            .forEach(function (cb) {
-                volumeIds.push(cb.value);
+        if (typeof Craft !== "undefined" && typeof Craft.t === "function") {
+            return Craft.t("asset-cleaner", fallback);
+        }
 
-                const wrapper = cb.closest(".checkbox-wrapper");
-                const label = wrapper ? wrapper.querySelector("label") : null;
-                volumeNames[cb.value] = label
-                    ? label.textContent.trim()
-                    : "Volume " + cb.value;
-            });
+        return fallback;
+    }
 
-        return { volumeIds: volumeIds, volumeNames: volumeNames };
+    function reportUtilityUiError(error, fallbackKey, fallbackMessage) {
+        console.error("Asset Cleaner: utility volume UI error.", error);
+
+        const message = getUtilityMessage(
+            fallbackKey || "error",
+            fallbackMessage || "An error occurred.",
+        );
+
+        if (
+            typeof Craft !== "undefined" &&
+            Craft.cp &&
+            typeof Craft.cp.displayError === "function"
+        ) {
+            Craft.cp.displayError(message);
+            return;
+        }
+
+        window.alert(message);
     }
 
     function showNoVolumesSelectedError() {
-        const message =
-            t.selectAtLeastOneVolume ||
-            "Select at least one volume to continue.";
+        const message = getUtilityMessage(
+            "noVolumesSelected",
+            "No volumes selected.",
+        );
 
         if (
             typeof Craft !== "undefined" &&
@@ -398,66 +438,82 @@
     }
 
     function syncUtilityVolumeToggleAll(container) {
-        const toggleAllInput = container.querySelector(
-            ".volume-master-checkbox",
-        );
-        const volumeCheckboxes = container.querySelectorAll(
-            '.volume-checkboxes input[type="checkbox"][name="volumeIds[]"]',
-        );
+        try {
+            const toggleAllInput = container.querySelector(
+                ".volume-master-checkbox",
+            );
+            const volumeCheckboxes = container.querySelectorAll(
+                '.volume-checkboxes input[type="checkbox"][name="volumeIds[]"]',
+            );
 
-        if (!toggleAllInput || !volumeCheckboxes.length) {
-            return;
-        }
-
-        let checkedCount = 0;
-        volumeCheckboxes.forEach(function (cb) {
-            if (cb.checked) {
-                checkedCount++;
+            if (!toggleAllInput || !volumeCheckboxes.length) {
+                return;
             }
-        });
 
-        toggleAllInput.checked = checkedCount === volumeCheckboxes.length;
-        toggleAllInput.indeterminate =
-            checkedCount > 0 && checkedCount < volumeCheckboxes.length;
+            let checkedCount = 0;
+            volumeCheckboxes.forEach(function (cb) {
+                if (cb.checked) {
+                    checkedCount++;
+                }
+            });
+
+            toggleAllInput.checked = checkedCount === volumeCheckboxes.length;
+            toggleAllInput.indeterminate =
+                checkedCount > 0 && checkedCount < volumeCheckboxes.length;
+        } catch (error) {
+            reportUtilityUiError(error);
+        }
     }
 
     function initUtilityVolumeToggleAll(container) {
-        const volumeCheckboxesContainer =
-            container.querySelector(".volume-checkboxes");
-        if (!volumeCheckboxesContainer) return;
+        try {
+            const volumeCheckboxesContainer =
+                container.querySelector(".volume-checkboxes");
+            if (!volumeCheckboxesContainer) return;
 
-        const volumeCheckboxes = volumeCheckboxesContainer.querySelectorAll(
-            'input[type="checkbox"][name="volumeIds[]"]',
-        );
-        const toggleAllInput = container.querySelector(
-            ".volume-master-checkbox",
-        );
+            const volumeCheckboxes = volumeCheckboxesContainer.querySelectorAll(
+                'input[type="checkbox"][name="volumeIds[]"]',
+            );
+            const toggleAllInput = container.querySelector(
+                ".volume-master-checkbox",
+            );
 
-        if (!volumeCheckboxes.length || !toggleAllInput) return;
+            if (!volumeCheckboxes.length || !toggleAllInput) return;
 
-        if (!toggleAllInput.dataset.bound) {
-            toggleAllInput.addEventListener("change", function (e) {
-                volumeCheckboxes.forEach(function (cb) {
-                    cb.checked = e.target.checked;
+            if (!toggleAllInput.dataset.bound) {
+                toggleAllInput.addEventListener("change", function (e) {
+                    try {
+                        volumeCheckboxes.forEach(function (cb) {
+                            cb.checked = e.target.checked;
+                        });
+
+                        syncUtilityVolumeToggleAll(container);
+                    } catch (error) {
+                        reportUtilityUiError(error);
+                    }
                 });
 
-                syncUtilityVolumeToggleAll(container);
+                toggleAllInput.dataset.bound = "1";
+            }
+
+            volumeCheckboxes.forEach(function (cb) {
+                if (cb.dataset.selectAllBound) return;
+
+                cb.addEventListener("change", function () {
+                    try {
+                        syncUtilityVolumeToggleAll(container);
+                    } catch (error) {
+                        reportUtilityUiError(error);
+                    }
+                });
+
+                cb.dataset.selectAllBound = "1";
             });
 
-            toggleAllInput.dataset.bound = "1";
+            syncUtilityVolumeToggleAll(container);
+        } catch (error) {
+            reportUtilityUiError(error);
         }
-
-        volumeCheckboxes.forEach(function (cb) {
-            if (cb.dataset.selectAllBound) return;
-
-            cb.addEventListener("change", function () {
-                syncUtilityVolumeToggleAll(container);
-            });
-
-            cb.dataset.selectAllBound = "1";
-        });
-
-        syncUtilityVolumeToggleAll(container);
     }
 
     function initUtilityPage() {
