@@ -32,7 +32,7 @@ Identify and clean up unused assets in Craft CMS 5.
 ### Via Composer
 
 ```bash
-composer require yann/craft-asset-cleaner
+composer require yannkost/craft-asset-cleaner
 php craft plugin/install asset-cleaner
 ```
 
@@ -55,7 +55,7 @@ php craft plugin/install asset-cleaner
 3. Require the package and install the plugin:
 
 ```bash
-composer require yann/craft-asset-cleaner
+composer require yannkost/craft-asset-cleaner
 php craft plugin/install asset-cleaner
 ```
 
