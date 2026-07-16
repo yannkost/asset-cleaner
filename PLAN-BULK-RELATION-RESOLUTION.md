@@ -132,13 +132,30 @@ Two invariants now hold in the codebase and MUST be preserved by the bulk
 implementation:
 
 1. **All-sites usage**: an asset used in ANY site's content counts as used.
-   Relation verdicts only depend on site-independent element attributes
-   (draft/revision/section), so tier queries loading one row per ID are safe —
-   but the parity command must run on a multi-site install to prove it.
 2. **No per-user verdicts**: the provisional-draft creator filter was removed
    from scan verdicts (see CHANGELOG). `initiatingUserId` no longer influences
-   any verdict, which removes the `draftCreatorId` population concern from the
-   original plan — the bulk loader needs no drafts-table priming.
+   any verdict.
+
+## Parity risk status: eliminated (not just mitigated)
+
+The original plan's main technical risk — the bulk loader feeding subtly
+different Entry objects into the shared policy code — no longer exists:
+
+- **Draft creator**: the verdict no longer reads `draftCreatorId` at all
+  (creator comparison removed, helpers deleted). A field no code reads cannot
+  cause divergence. The bulk loader needs no drafts-table priming.
+- **Multi-site row choice**: everything the relation verdict consults —
+  `revisionId`, `draftId`, provisional flag, `sectionId`, `ownerId` — is an
+  element-level attribute, identical on every site's row of the same element.
+  Whichever site row `->one()` or `->unique()` returns, the verdict is the
+  same by construction.
+
+The parity console command is therefore a regression tripwire rather than a
+prerequisite: its job is to catch anyone LATER adding a site-dependent or
+user-dependent input to the verdict, which would break the proof above.
+Guard this in review: any new verdict input must be element-level
+(site-independent) and user-independent, or the bulk loader must be updated
+in the same change.
 
 ## Craft 5 API points to confirm during implementation
 
