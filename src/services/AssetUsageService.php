@@ -314,46 +314,9 @@ class AssetUsageService extends Component
         return $result;
     }
 
-    /**
-     * Build a content index for efficient batch asset scanning.
-     *
-     * @return array{entries: array<int, string>, globals: array<string, string>}
-     */
-    public function buildContentIndex(): array
-    {
-        return $this->getContentUsageService()->buildContentIndex();
-    }
+    
 
-    /**
-     * Check whether an asset is used with a pre-built content index.
-     *
-     * @param array{entries?: array<int, string>, globals?: array<string, string>} $contentIndex
-     */
-    public function isAssetUsedWithIndex(
-        int $assetId,
-        array $contentIndex,
-        ?bool $includeDrafts = null,
-        ?bool $includeRevisions = null,
-        ?int $initiatingUserId = null,
-        ?bool $countAllRelationsAsUsage = true,
-    ): bool {
-        if (
-            $this->getRelationUsageResolver()->hasResolvedRelationUsage(
-                $assetId,
-                $includeDrafts,
-                $includeRevisions,
-                $initiatingUserId,
-                $countAllRelationsAsUsage,
-            )
-        ) {
-            return true;
-        }
-
-        return $this->getContentUsageService()->isAssetUsedWithIndex(
-            $assetId,
-            $contentIndex,
-        );
-    }
+    
 
     private function getEntryUsageResolver(): EntryUsageResolver
     {
