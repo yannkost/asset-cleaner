@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Time-bounded the relation scan stage so a single queue execution stops and re-queues before hitting the worker timeout, fixing `ScanRelationsJob` failures with "exceeded the timeout of 300 seconds" on large or heavily related asset libraries.
+- **Multi-site content is now fully scanned.** Content scanning (entries and global sets) previously only inspected the primary site's field content, so an asset referenced only in another site's CKEditor/Redactor content could be wrongly reported as unused. All content queries now cover every site.
+- **Provisional drafts now count as usage for every user.** When "include drafts" is enabled, scans previously only counted provisional drafts belonging to the user who started the scan, so assets referenced in other editors' work-in-progress could be wrongly reported as unused. The per-user filter has been removed from scans and the usage inspector.
 
 ## [1.4.0] - 2026-04-16
 

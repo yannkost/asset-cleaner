@@ -834,7 +834,10 @@ class ScanService extends Component
             return count($usedIds);
         }
 
-        foreach (GlobalSet::find()->all() as $globalSet) {
+        // site('*') so every site's global content is inspected — global set
+        // fields are translatable and an asset may only be referenced in a
+        // non-primary site's content.
+        foreach (GlobalSet::find()->site("*")->all() as $globalSet) {
             /** @var GlobalSet $globalSet */
             foreach ($this->getHtmlFieldsForElement($globalSet) as $field) {
 
@@ -2227,9 +2230,10 @@ class ScanService extends Component
     /**
      * Iterate entries that should participate in content scanning in batches.
      *
-     * When draft usage is enabled, this includes canonical entries, saved drafts,
-     * and provisional drafts created by the user who started the scan. When
-     * revision usage is enabled, this also includes revisions.
+     * When draft usage is enabled, this includes canonical entries, saved
+     * drafts, and all users' provisional drafts. When revision usage is
+     * enabled, this also includes revisions. Every entry is yielded once per
+     * site so per-site field content is inspected.
      *
      * @param array<int> $relevantTypeIds
      * @param int $batchSize
@@ -2268,11 +2272,19 @@ class ScanService extends Component
                     }
 
                     $entryId = (int) ($entry->id ?? 0);
-                    if ($entryId <= 0 || isset($seenEntryIds[$entryId])) {
+                    if ($entryId <= 0) {
                         continue;
                     }
 
-                    $seenEntryIds[$entryId] = true;
+                    // Key by entry AND site: with site('*') queries the same
+                    // entry ID appears once per site, each carrying that
+                    // site's field content, and every one must be scanned.
+                    $seenKey = $entryId . "-" . (int) ($entry->siteId ?? 0);
+                    if (isset($seenEntryIds[$seenKey])) {
+                        continue;
+                    }
+
+                    $seenEntryIds[$seenKey] = true;
                     yield $entry;
                 }
             }
@@ -2281,6 +2293,10 @@ class ScanService extends Component
 
     /**
      * Build the element queries used for batched content scanning.
+     *
+     * Queries cover every site so per-site field content is always inspected,
+     * and provisional drafts are included for all users — an asset referenced
+     * in anyone's work-in-progress must never be reported as unused.
      *
      * @param array<int> $relevantTypeIds
      * @param bool $includeDrafts
@@ -2301,6 +2317,7 @@ class ScanService extends Component
         $queries = [
             Entry::find()
                 ->typeId($relevantTypeIds)
+                ->site("*")
                 ->status(null)
                 ->orderBy(["elements.id" => SORT_ASC]),
         ];
@@ -2308,22 +2325,22 @@ class ScanService extends Component
         if ($includeDrafts) {
             $queries[] = Entry::find()
                 ->typeId($relevantTypeIds)
+                ->site("*")
                 ->drafts()
                 ->savedDraftsOnly()
                 ->orderBy(["elements.id" => SORT_ASC]);
 
-            if ($initiatingUserId !== null && $initiatingUserId > 0) {
-                $queries[] = Entry::find()
-                    ->typeId($relevantTypeIds)
-                    ->provisionalDrafts()
-                    ->draftCreator($initiatingUserId)
-                    ->orderBy(["elements.id" => SORT_ASC]);
-            }
+            $queries[] = Entry::find()
+                ->typeId($relevantTypeIds)
+                ->site("*")
+                ->provisionalDrafts()
+                ->orderBy(["elements.id" => SORT_ASC]);
         }
 
         if ($includeRevisions) {
             $queries[] = Entry::find()
                 ->typeId($relevantTypeIds)
+                ->site("*")
                 ->revisions()
                 ->orderBy(["elements.id" => SORT_ASC]);
         }

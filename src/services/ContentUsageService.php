@@ -145,7 +145,7 @@ class ContentUsageService extends Component
         $results = [];
         $searchPatterns = $this->buildAssetSearchPatterns($asset);
 
-        foreach (GlobalSet::find()->all() as $globalSet) {
+        foreach (GlobalSet::find()->site("*")->all() as $globalSet) {
             foreach ($this->getHtmlFieldsForElement($globalSet) as $field) {
                 try {
                     $fieldValue = $globalSet->getFieldValue($field->handle);
@@ -185,7 +185,15 @@ class ContentUsageService extends Component
             }
         }
 
-        return $results;
+        // With site('*') the same global set is visited once per site — keep
+        // one result row per set and field.
+        $unique = [];
+        foreach ($results as $result) {
+            $key = (string) ($result["handle"] ?? "") . "-" . (string) ($result["field"] ?? "");
+            $unique[$key] = $result;
+        }
+
+        return array_values($unique);
     }
 
     /**
@@ -238,7 +246,10 @@ class ContentUsageService extends Component
         }
 
         $entryIndex = [];
-        $entryQuery = Entry::find()->status(null)->typeId($relevantTypeIds);
+        $entryQuery = Entry::find()
+            ->status(null)
+            ->typeId($relevantTypeIds)
+            ->site("*");
 
         $batchSize = 200;
         foreach ($entryQuery->each($batchSize) as $entry) {
@@ -265,7 +276,13 @@ class ContentUsageService extends Component
             }
 
             if ($hasAssetReference) {
-                $entryIndex[(int) $entry->id] = $content;
+                // Concatenate per entry ID: with site('*') the same entry
+                // appears once per site, and every site's content must be
+                // searchable in the index.
+                $entryId = (int) $entry->id;
+                $entryIndex[$entryId] = isset($entryIndex[$entryId])
+                    ? $entryIndex[$entryId] . "\n" . $content
+                    : $content;
             }
         }
 
@@ -333,6 +350,10 @@ class ContentUsageService extends Component
     /**
      * Fetch all entries that should be scanned for content usage.
      *
+     * Entries are fetched for every site (one instance per site, each with
+     * that site's field content) and provisional drafts are included for all
+     * users, not just the initiating one.
+     *
      * @param array<int> $relevantTypeIds
      * @return array<int, Entry>
      */
@@ -342,39 +363,39 @@ class ContentUsageService extends Component
         ?bool $includeRevisions = null,
         ?int $initiatingUserId = null,
     ): array {
-        $entries = Entry::find()->typeId($relevantTypeIds)->status(null)->all();
+        $entries = Entry::find()
+            ->typeId($relevantTypeIds)
+            ->site("*")
+            ->status(null)
+            ->all();
 
         $allEntries = [];
         foreach ($entries as $entry) {
-            $allEntries[(int) $entry->id] = $entry;
+            $allEntries[$this->entrySiteKey($entry)] = $entry;
         }
 
         if ($this->getEntryUsageResolver()->resolveIncludeDrafts($includeDrafts)) {
             foreach (
                 Entry::find()
                     ->typeId($relevantTypeIds)
+                    ->site("*")
                     ->drafts()
                     ->savedDraftsOnly()
                     ->all()
                 as $entry
             ) {
-                $allEntries[(int) $entry->id] = $entry;
+                $allEntries[$this->entrySiteKey($entry)] = $entry;
             }
 
-            $draftCreatorUserId = $this->getEntryUsageResolver()->resolveDraftCreatorUserId(
-                $initiatingUserId,
-            );
-
-            $provisionalDraftsQuery = Entry::find()
-                ->typeId($relevantTypeIds)
-                ->provisionalDrafts();
-
-            if ($draftCreatorUserId !== null) {
-                $provisionalDraftsQuery->draftCreator($draftCreatorUserId);
-            }
-
-            foreach ($provisionalDraftsQuery->all() as $entry) {
-                $allEntries[(int) $entry->id] = $entry;
+            foreach (
+                Entry::find()
+                    ->typeId($relevantTypeIds)
+                    ->site("*")
+                    ->provisionalDrafts()
+                    ->all()
+                as $entry
+            ) {
+                $allEntries[$this->entrySiteKey($entry)] = $entry;
             }
         }
 
@@ -386,15 +407,25 @@ class ContentUsageService extends Component
             foreach (
                 Entry::find()
                     ->typeId($relevantTypeIds)
+                    ->site("*")
                     ->revisions()
                     ->all()
                 as $entry
             ) {
-                $allEntries[(int) $entry->id] = $entry;
+                $allEntries[$this->entrySiteKey($entry)] = $entry;
             }
         }
 
         return array_values($allEntries);
+    }
+
+    /**
+     * Build a dedupe key that keeps one entry instance per entry AND site,
+     * since each site instance carries its own field content.
+     */
+    private function entrySiteKey(Entry $entry): string
+    {
+        return (int) ($entry->id ?? 0) . "-" . (int) ($entry->siteId ?? 0);
     }
 
     /**
@@ -479,10 +510,15 @@ class ContentUsageService extends Component
     {
         $globalIndex = [];
 
-        foreach (GlobalSet::find()->all() as $globalSet) {
+        foreach (GlobalSet::find()->site("*")->all() as $globalSet) {
             $content = $this->collectHtmlContentFromElement($globalSet);
             if ($content !== "") {
-                $globalIndex[(string) $globalSet->handle] = $content;
+                // Concatenate per handle: one instance per site, and every
+                // site's content must be searchable.
+                $handle = (string) $globalSet->handle;
+                $globalIndex[$handle] = isset($globalIndex[$handle])
+                    ? $globalIndex[$handle] . "\n" . $content
+                    : $content;
             }
         }
 

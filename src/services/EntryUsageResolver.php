@@ -18,34 +18,7 @@ use yann\assetcleaner\Plugin;
  */
 class EntryUsageResolver extends Component
 {
-    /**
-     * Resolve the user ID whose provisional drafts should be considered.
-     *
-     * If no explicit initiating user ID is provided, this falls back to the
-     * current authenticated control panel user when available.
-     */
-    public function resolveDraftCreatorUserId(
-        ?int $initiatingUserId = null,
-    ): ?int {
-        if ($initiatingUserId !== null && $initiatingUserId > 0) {
-            return $initiatingUserId;
-        }
-
-        try {
-            $currentUser = Craft::$app->getUser()->getIdentity();
-
-            return $currentUser ? (int) $currentUser->id : null;
-        } catch (\Throwable $e) {
-            Logger::warning(
-                "Could not resolve current user while resolving draft creator usage context.",
-                [
-                    "error" => $e->getMessage(),
-                ],
-            );
-
-            return null;
-        }
-    }
+    
 
     /**
      * Resolve whether draft usage should count for this check.
@@ -230,26 +203,10 @@ class EntryUsageResolver extends Component
             method_exists($entry, "getIsProvisionalDraft") &&
             $entry->getIsProvisionalDraft()
         ) {
-            if (!$includeDrafts) {
-                return false;
-            }
-
-            $resolvedDraftCreatorUserId = $this->resolveDraftCreatorUserId(
-                $initiatingUserId,
-            );
-            $entryDraftCreatorUserId = $this->getDraftCreatorUserIdForEntry(
-                $entry,
-            );
-
-            if (
-                $resolvedDraftCreatorUserId !== null &&
-                $entryDraftCreatorUserId !== null &&
-                $entryDraftCreatorUserId !== $resolvedDraftCreatorUserId
-            ) {
-                return false;
-            }
-
-            return true;
+            // Provisional drafts count for EVERY user, not just the scan
+            // initiator: an asset referenced in anyone's work-in-progress
+            // must never be reported as unused.
+            return $includeDrafts;
         }
 
         if (
@@ -365,36 +322,5 @@ class EntryUsageResolver extends Component
         }
     }
 
-    /**
-     * Resolve the draft creator user ID for an entry when available.
-     */
-    private function getDraftCreatorUserIdForEntry(Entry $entry): ?int
-    {
-        try {
-            if (method_exists($entry, "getDraftCreatorId")) {
-                $draftCreatorId = $entry->getDraftCreatorId();
-
-                return is_numeric($draftCreatorId)
-                    ? (int) $draftCreatorId
-                    : null;
-            }
-
-            if (
-                isset($entry->draftCreatorId) &&
-                is_numeric($entry->draftCreatorId)
-            ) {
-                return (int) $entry->draftCreatorId;
-            }
-        } catch (\Throwable $e) {
-            Logger::warning(
-                "Could not resolve draft creator while evaluating entry asset usage.",
-                [
-                    "entryId" => (int) ($entry->id ?? 0),
-                    "error" => $e->getMessage(),
-                ],
-            );
-        }
-
-        return null;
-    }
+    
 }
