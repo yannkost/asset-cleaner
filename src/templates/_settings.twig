@@ -46,6 +46,36 @@
     errors: settings.getErrors('includeRevisionsByDefault') ?? [],
 }) }}
 
+<hr>
+
+<h2>{{ 'Scan performance'|t('asset-cleaner') }}</h2>
+
+{{ forms.textField({
+    label: 'Relation batch size'|t('asset-cleaner'),
+    instructions: 'Maximum number of assets loaded for relation scanning per queue execution. Lower this (e.g. to 500) on sites with heavy or deeply nested relations if scan jobs time out. You can also override this with `relationBatchSize` in `config/asset-cleaner.php` or the `ASSET_CLEANER_RELATION_BATCH_SIZE` environment variable.'|t('asset-cleaner'),
+    id: 'relationBatchSize',
+    name: 'relationBatchSize',
+    type: 'number',
+    min: 1,
+    step: 1,
+    size: 8,
+    value: settings.relationBatchSize ?? 2000,
+    errors: settings.getErrors('relationBatchSize') ?? [],
+}) }}
+
+{{ forms.textField({
+    label: 'Relation time budget (seconds)'|t('asset-cleaner'),
+    instructions: 'Wall-clock budget for the relation stage of a single queue execution. Once exceeded, the job stops and re-queues to continue, keeping each execution safely under the queue’s time-to-reserve (TTR, 300s by default). Keep this comfortably below your TTR. You can also override this with `relationTimeBudgetSeconds` in `config/asset-cleaner.php` or the `ASSET_CLEANER_RELATION_TIME_BUDGET` environment variable.'|t('asset-cleaner'),
+    id: 'relationTimeBudgetSeconds',
+    name: 'relationTimeBudgetSeconds',
+    type: 'number',
+    min: 1,
+    step: 1,
+    size: 8,
+    value: settings.relationTimeBudgetSeconds ?? 120,
+    errors: settings.getErrors('relationTimeBudgetSeconds') ?? [],
+}) }}
+
 <div class="readable">
     <p>
         {{ 'Notes:'|t('asset-cleaner') }}
