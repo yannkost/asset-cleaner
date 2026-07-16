@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Relation usage verdicts and entry lookups are now cached for the duration of a queue execution instead of a single chunk, so repeated relation sources and shared owners in nested-element chains (Matrix, CKEditor) are only resolved once. This significantly reduces database queries on relation-heavy sites.
+- Relation sources are now resolved in bulk: entry sources are classified, loaded, and policy-checked with a handful of set-based queries per batch instead of several queries per source, reducing scan queries by orders of magnitude on relation-heavy sites. Disable with `bulkRelationResolution => false` in `config/asset-cleaner.php` or `ASSET_CLEANER_BULK_RELATION_RESOLUTION=false` to fall back to per-source resolution. Verify parity on an install with `php craft asset-cleaner/diagnostics/relation-parity`.
 
 ### Fixed
 - Time-bounded the relation scan stage so a single queue execution stops and re-queues before hitting the worker timeout, fixing `ScanRelationsJob` failures with "exceeded the timeout of 300 seconds" on large or heavily related asset libraries.

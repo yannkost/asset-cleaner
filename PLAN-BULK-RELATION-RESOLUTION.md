@@ -1,6 +1,8 @@
 # Plan: Bulk relation source resolution ("B")
 
-Status: planned, not implemented.
+Status: IMPLEMENTED. Parity verified against a production-like multi-thousand
+asset install (3000-asset sample, both scan modes, drafts+revisions enabled):
+identical verdicts. See `asset-cleaner/diagnostics/relation-parity`.
 Branch context: builds on `fix/scan-relations-timeout` (time-budgeted batches + per-execution caches).
 
 ## Problem

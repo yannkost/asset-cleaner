@@ -93,6 +93,383 @@ class RelationUsageResolver extends Component
         }
     }
 
+    /**
+     * @var int Number of source IDs resolved per bulk-prime chunk. Bounds
+     * peak memory: at most this many entries (plus owners) are loaded at once.
+     */
+    private const BULK_PRIME_CHUNK_SIZE = 500;
+
+    /**
+     * @var bool|null Test/diagnostic override for bulk priming. Null defers
+     * to config; true/false forces it on or off (used by the parity command).
+     */
+    public ?bool $forceBulkResolution = null;
+
+    /**
+     * Whether bulk source resolution is enabled.
+     *
+     * Enabled by default; disable via config/asset-cleaner.php
+     * ('bulkRelationResolution' => false) or the
+     * ASSET_CLEANER_BULK_RELATION_RESOLUTION env var. Disabling skips the
+     * priming step entirely, so every source resolves through the original
+     * per-source path.
+     */
+    private function isBulkRelationResolutionEnabled(): bool
+    {
+        if ($this->forceBulkResolution !== null) {
+            return $this->forceBulkResolution;
+        }
+
+        $rawValue = null;
+
+        try {
+            $config = Craft::$app
+                ->getConfig()
+                ->getConfigFromFile("asset-cleaner");
+            if (
+                is_array($config) &&
+                array_key_exists("bulkRelationResolution", $config)
+            ) {
+                $rawValue = $config["bulkRelationResolution"];
+            }
+        } catch (\Throwable $e) {
+            Logger::warning(
+                "Could not load Asset Cleaner config while resolving bulk relation resolution flag.",
+                ["error" => $e->getMessage()],
+            );
+        }
+
+        $envValue = getenv("ASSET_CLEANER_BULK_RELATION_RESOLUTION");
+        if (is_string($envValue) && trim($envValue) !== "") {
+            $rawValue = trim($envValue);
+        }
+
+        if ($rawValue === null) {
+            return true;
+        }
+
+        return filter_var($rawValue, FILTER_VALIDATE_BOOLEAN);
+    }
+
+    /**
+     * Bulk-resolve usage verdicts for relation source elements and prime the
+     * per-execution caches.
+     *
+     * This is a pure accelerator: it only fills the same caches the
+     * per-source loops read, using set-based queries instead of per-source
+     * ones. Sources it does not prime (non-entry elements, entries missing
+     * from all lookup tiers) fall through to the unchanged per-source path.
+     * Only entry-type sources are bulked because for them the "resolve to an
+     * entry" step is the source itself — no ancestry logic is reimplemented.
+     *
+     * Verdicts must stay site- and user-independent (see
+     * PLAN-BULK-RELATION-RESOLUTION.md); any new verdict input must honor
+     * that or update this loader in the same change.
+     *
+     * @param array<int> $sourceIds
+     */
+    private function primeSourceVerdictsInBulk(
+        array $sourceIds,
+        ?bool $includeDrafts = null,
+        ?bool $includeRevisions = null,
+        ?int $initiatingUserId = null,
+    ): void {
+        if (!$this->isBulkRelationResolutionEnabled()) {
+            return;
+        }
+
+        $this->ensureVerdictCacheSignature(
+            $includeDrafts,
+            $includeRevisions,
+            $initiatingUserId,
+        );
+
+        $pendingIds = [];
+        foreach ($sourceIds as $sourceId) {
+            $sourceId = (int) $sourceId;
+            if (
+                $sourceId > 0 &&
+                !array_key_exists($sourceId, $this->fallbackSourceVerdictCache)
+            ) {
+                $pendingIds[$sourceId] = true;
+            }
+        }
+
+        if (empty($pendingIds)) {
+            return;
+        }
+
+        $primedCount = 0;
+        $legacyCount = 0;
+
+        foreach (
+            array_chunk(array_keys($pendingIds), self::BULK_PRIME_CHUNK_SIZE)
+            as $chunkIds
+        ) {
+            try {
+                [$chunkPrimed, $chunkLegacy] = $this->primeSourceVerdictChunk(
+                    $chunkIds,
+                    $includeDrafts,
+                    $includeRevisions,
+                    $initiatingUserId,
+                );
+                $primedCount += $chunkPrimed;
+                $legacyCount += $chunkLegacy;
+            } catch (\Throwable $e) {
+                // A failed chunk is not fatal: its sources simply resolve
+                // through the per-source path.
+                Logger::warning(
+                    "Bulk relation source priming failed for a chunk; falling back to per-source resolution.",
+                    [
+                        "chunkSize" => count($chunkIds),
+                        "error" => $e->getMessage(),
+                    ],
+                );
+                $legacyCount += count($chunkIds);
+            }
+        }
+
+        Logger::debug("Primed relation source verdicts in bulk.", [
+            "requested" => count($pendingIds),
+            "primed" => $primedCount,
+            "leftToPerSourcePath" => $legacyCount,
+        ]);
+    }
+
+    /**
+     * Prime one chunk of source IDs.
+     *
+     * @param array<int> $chunkIds
+     * @return array{0:int,1:int} primed count, left-to-legacy count
+     */
+    private function primeSourceVerdictChunk(
+        array $chunkIds,
+        ?bool $includeDrafts,
+        ?bool $includeRevisions,
+        ?int $initiatingUserId,
+    ): array {
+        $primedCount = 0;
+        $legacyCount = 0;
+
+        $elementRows = (new Query())
+            ->select(["id", "type", "dateDeleted"])
+            ->from(Table::ELEMENTS)
+            ->where(["id" => $chunkIds])
+            ->all();
+
+        $entrySourceIds = [];
+        $seenIds = [];
+
+        foreach ($elementRows as $row) {
+            $elementId = (int) ($row["id"] ?? 0);
+            if ($elementId <= 0) {
+                continue;
+            }
+            $seenIds[$elementId] = true;
+
+            if (!empty($row["dateDeleted"])) {
+                // Parity with sourceCountsForFallbackRelationUsage: deleted
+                // sources never count. Strict mode reaches the same verdict
+                // because its relations query already excludes them.
+                $this->fallbackSourceVerdictCache[$elementId] = false;
+                $this->strictSourceVerdictCache[$elementId] = false;
+                $primedCount++;
+                continue;
+            }
+
+            if ((string) ($row["type"] ?? "") === Entry::class) {
+                $entrySourceIds[] = $elementId;
+            } else {
+                // Non-entry sources keep the per-source path: their ancestry
+                // semantics (owner walks, raw-ancestry BFS) are not
+                // reimplemented here.
+                $legacyCount++;
+            }
+        }
+
+        // IDs with no elements row at all resolve (to nothing) via the
+        // per-source path, same as today.
+        $legacyCount += count($chunkIds) - count($seenIds);
+
+        if (empty($entrySourceIds)) {
+            return [$primedCount, $legacyCount];
+        }
+
+        $loadedEntries = $this->batchLoadEntriesIgnoringUsagePolicy(
+            $entrySourceIds,
+        );
+
+        $this->primeOwnerChains($loadedEntries);
+
+        foreach ($entrySourceIds as $sourceId) {
+            $entry = $loadedEntries[$sourceId] ?? null;
+            if (!$entry instanceof Entry) {
+                // Missing from all lookup tiers: leave to the per-source
+                // path, which additionally tries getElementById() and the
+                // raw-ancestry BFS.
+                $legacyCount++;
+                continue;
+            }
+
+            // For entry sources, fallback mode and strict mode provably
+            // reduce to the same expression:
+            // resolveUsageEntry(...) instanceof Entry.
+            $verdict =
+                $this->getEntryUsageResolver()->resolveUsageEntry(
+                    $entry,
+                    $includeDrafts,
+                    $includeRevisions,
+                    $initiatingUserId,
+                ) instanceof Entry;
+
+            $this->fallbackSourceVerdictCache[$sourceId] = $verdict;
+            $this->strictSourceVerdictCache[$sourceId] = $verdict;
+            $primedCount++;
+        }
+
+        return [$primedCount, $legacyCount];
+    }
+
+    /**
+     * Batch equivalent of findEntryByIdIgnoringUsagePolicy: load entries by
+     * ID across the same four tiers (live, saved drafts, provisional drafts,
+     * revisions), one batched query per tier instead of up to four queries
+     * per entry. IDs found in an earlier tier are excluded from later tiers.
+     * Results (hits only) also prime the entry lookup cache.
+     *
+     * @param array<int> $entryIds
+     * @return array<int, Entry> Loaded entries keyed by element ID
+     */
+    private function batchLoadEntriesIgnoringUsagePolicy(array $entryIds): array
+    {
+        $loaded = [];
+
+        $missingIds = [];
+        foreach ($entryIds as $entryId) {
+            $entryId = (int) $entryId;
+            if ($entryId <= 0) {
+                continue;
+            }
+
+            if (
+                array_key_exists($entryId, $this->entryLookupCache) &&
+                $this->entryLookupCache[$entryId] instanceof Entry
+            ) {
+                $loaded[$entryId] = $this->entryLookupCache[$entryId];
+                continue;
+            }
+
+            $missingIds[$entryId] = true;
+        }
+
+        $tierModifiers = [
+            fn(EntryQuery $query): EntryQuery => $query,
+            fn(EntryQuery $query): EntryQuery => $query
+                ->drafts()
+                ->savedDraftsOnly(),
+            fn(EntryQuery $query): EntryQuery => $query->provisionalDrafts(),
+            fn(EntryQuery $query): EntryQuery => $query->revisions(),
+        ];
+
+        foreach ($tierModifiers as $applyTier) {
+            if (empty($missingIds)) {
+                break;
+            }
+
+            $query = Entry::find()
+                ->id(array_keys($missingIds))
+                ->site("*")
+                ->unique()
+                ->status(null)
+                ->allowOwnerDrafts(true)
+                ->allowOwnerRevisions(true);
+
+            foreach ($applyTier($query)->all() as $entry) {
+                if (!$entry instanceof Entry) {
+                    continue;
+                }
+
+                $entryId = (int) ($entry->id ?? 0);
+                if ($entryId <= 0 || isset($loaded[$entryId])) {
+                    continue;
+                }
+
+                $loaded[$entryId] = $entry;
+                unset($missingIds[$entryId]);
+
+                if (count($this->entryLookupCache) < self::MAX_CACHED_ENTRIES) {
+                    $this->entryLookupCache[$entryId] = $entry;
+                }
+            }
+        }
+
+        return $loaded;
+    }
+
+    /**
+     * Pre-wire owner chains for loaded entries so the usage policy's
+     * resolveToTopLevelEntry() walks getOwner() without lazy database
+     * queries. Owners are loaded level by level in batches, up to the same
+     * depth the per-source walk uses. Entries whose owner cannot be batch
+     * loaded are left unwired — their getOwner() lazily queries exactly as
+     * the per-source path would.
+     *
+     * @param array<int, Entry> $entries
+     */
+    private function primeOwnerChains(array $entries): void
+    {
+        $entryUsageResolver = $this->getEntryUsageResolver();
+        $knownEntries = $entries;
+        $frontier = $entries;
+        $maxDepth = 10;
+
+        for ($depth = 0; $depth < $maxDepth && !empty($frontier); $depth++) {
+            $wantedOwnerIds = [];
+
+            foreach ($frontier as $entry) {
+                if ($entryUsageResolver->hasUsableSection($entry)) {
+                    continue;
+                }
+
+                if (!method_exists($entry, "getOwnerId")) {
+                    continue;
+                }
+
+                $ownerId = (int) ($entry->getOwnerId() ?? 0);
+                if ($ownerId > 0 && !isset($knownEntries[$ownerId])) {
+                    $wantedOwnerIds[$ownerId] = true;
+                }
+            }
+
+            $newOwners = empty($wantedOwnerIds)
+                ? []
+                : $this->batchLoadEntriesIgnoringUsagePolicy(
+                    array_keys($wantedOwnerIds),
+                );
+
+            foreach ($newOwners as $ownerId => $owner) {
+                $knownEntries[$ownerId] = $owner;
+            }
+
+            foreach ($frontier as $entry) {
+                if (
+                    $entryUsageResolver->hasUsableSection($entry) ||
+                    !method_exists($entry, "getOwnerId") ||
+                    !method_exists($entry, "setOwner")
+                ) {
+                    continue;
+                }
+
+                $ownerId = (int) ($entry->getOwnerId() ?? 0);
+                if ($ownerId > 0 && isset($knownEntries[$ownerId])) {
+                    $entry->setOwner($knownEntries[$ownerId]);
+                }
+            }
+
+            $frontier = $newOwners;
+        }
+    }
+
     public function __construct(
         ?EntryUsageResolver $entryUsageResolver = null,
         array $config = [],
@@ -174,6 +551,13 @@ class RelationUsageResolver extends Component
                 ->all();
 
             $this->ensureVerdictCacheSignature(
+                $includeDrafts,
+                $includeRevisions,
+                $initiatingUserId,
+            );
+
+            $this->primeSourceVerdictsInBulk(
+                array_column($relations, "sourceId"),
                 $includeDrafts,
                 $includeRevisions,
                 $initiatingUserId,
@@ -487,6 +871,13 @@ class RelationUsageResolver extends Component
             ->all();
 
         $this->ensureVerdictCacheSignature(
+            $includeDrafts,
+            $includeRevisions,
+            $initiatingUserId,
+        );
+
+        $this->primeSourceVerdictsInBulk(
+            array_column($relations, "sourceId"),
             $includeDrafts,
             $includeRevisions,
             $initiatingUserId,

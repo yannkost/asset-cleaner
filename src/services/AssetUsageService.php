@@ -327,7 +327,7 @@ class AssetUsageService extends Component
         return $this->entryUsageResolver;
     }
 
-    private function getRelationUsageResolver(): RelationUsageResolver
+    public function getRelationUsageResolver(): RelationUsageResolver
     {
         if ($this->relationUsageResolver === null) {
             $this->relationUsageResolver = new RelationUsageResolver(
