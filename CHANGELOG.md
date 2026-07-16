@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a **Relation batch size** setting so you can lower how many assets each relation scan queue execution loads on sites with heavy or deeply nested relations. Overridable via `relationBatchSize` in `config/asset-cleaner.php` or the `ASSET_CLEANER_RELATION_BATCH_SIZE` environment variable.
 - Added a **Relation time budget** setting that stops and re-queues a relation scan execution once a wall-clock budget is reached, keeping each execution under the queue's time-to-reserve (TTR). Overridable via `relationTimeBudgetSeconds` in `config/asset-cleaner.php` or the `ASSET_CLEANER_RELATION_TIME_BUDGET` environment variable.
 
+### Changed
+- Relation usage verdicts and entry lookups are now cached for the duration of a queue execution instead of a single chunk, so repeated relation sources and shared owners in nested-element chains (Matrix, CKEditor) are only resolved once. This significantly reduces database queries on relation-heavy sites.
+
 ### Fixed
 - Time-bounded the relation scan stage so a single queue execution stops and re-queues before hitting the worker timeout, fixing `ScanRelationsJob` failures with "exceeded the timeout of 300 seconds" on large or heavily related asset libraries.
 

@@ -1904,6 +1904,11 @@ class ScanService extends Component
             (int) ($batchSize ?? $this->getRelationBatchSize()),
         );
         $relationTimeBudget = max(1, $this->getRelationTimeBudget());
+
+        // Fresh caches per queue execution: resolved source verdicts and
+        // entry lookups are shared across all sub-chunks below, but never
+        // survive into the next job of a long-running queue worker.
+        Plugin::getInstance()->assetUsage->resetRelationResolutionCaches();
         $totalAssets = max(0, (int) ($meta["totalAssets"] ?? 0));
         $batchOffset = max(0, min($processedAssets, $totalAssets));
         $expectedRelationOffset = max(0, (int) ($meta["relationOffset"] ?? 0));

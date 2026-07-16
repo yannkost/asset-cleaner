@@ -24,6 +24,75 @@ class RelationUsageResolver extends Component
 {
     private ?EntryUsageResolver $entryUsageResolver = null;
 
+    /**
+     * @var int Maximum number of entries retained in the entry lookup cache.
+     * Verdict caches hold booleans and need no cap; entries are full element
+     * models, so growth must be bounded for long-running queue workers.
+     */
+    private const MAX_CACHED_ENTRIES = 10000;
+
+    /**
+     * @var array<int,bool> Fallback-mode source usage verdicts, keyed by
+     * source element ID. Valid for the current cache options signature only.
+     */
+    private array $fallbackSourceVerdictCache = [];
+
+    /**
+     * @var array<int,bool> Strict-mode source usage verdicts, keyed by source
+     * element ID. Valid for the current cache options signature only.
+     */
+    private array $strictSourceVerdictCache = [];
+
+    /**
+     * @var array<int,Entry|null> Entries resolved regardless of usage policy,
+     * keyed by element ID. Policy-independent, so shared owners in nested
+     * element chains are only ever fetched once per cache lifetime.
+     */
+    private array $entryLookupCache = [];
+
+    /**
+     * @var string|null Options signature the verdict caches were built for.
+     */
+    private ?string $verdictCacheSignature = null;
+
+    /**
+     * Clear all resolution caches.
+     *
+     * Call once per queue execution (or whenever underlying content may have
+     * changed) so caches never leak stale verdicts across scans in
+     * long-running queue workers.
+     */
+    public function resetResolutionCaches(): void
+    {
+        $this->fallbackSourceVerdictCache = [];
+        $this->strictSourceVerdictCache = [];
+        $this->entryLookupCache = [];
+        $this->verdictCacheSignature = null;
+    }
+
+    /**
+     * Invalidate the verdict caches when the usage options they were built
+     * with change. The entry lookup cache is policy-independent and survives.
+     */
+    private function ensureVerdictCacheSignature(
+        ?bool $includeDrafts,
+        ?bool $includeRevisions,
+        ?int $initiatingUserId,
+    ): void {
+        $signature = sprintf(
+            "%s|%s|%s",
+            $includeDrafts === null ? "n" : (int) $includeDrafts,
+            $includeRevisions === null ? "n" : (int) $includeRevisions,
+            $initiatingUserId ?? "n",
+        );
+
+        if ($this->verdictCacheSignature !== $signature) {
+            $this->fallbackSourceVerdictCache = [];
+            $this->strictSourceVerdictCache = [];
+            $this->verdictCacheSignature = $signature;
+        }
+    }
+
     public function __construct(
         ?EntryUsageResolver $entryUsageResolver = null,
         array $config = [],
@@ -104,8 +173,13 @@ class RelationUsageResolver extends Component
                 ])
                 ->all();
 
+            $this->ensureVerdictCacheSignature(
+                $includeDrafts,
+                $includeRevisions,
+                $initiatingUserId,
+            );
+
             $usedAssetIds = [];
-            $resolvedSourceCache = [];
 
             foreach ($relations as $relation) {
                 $sourceId = (int) ($relation["sourceId"] ?? 0);
@@ -115,16 +189,17 @@ class RelationUsageResolver extends Component
                     continue;
                 }
 
-                if (!array_key_exists($sourceId, $resolvedSourceCache)) {
-                    $resolvedSourceCache[$sourceId] = $this->resolveRelationSourceEntry(
-                        $sourceId,
-                        $includeDrafts,
-                        $includeRevisions,
-                        $initiatingUserId,
-                    );
+                if (!array_key_exists($sourceId, $this->strictSourceVerdictCache)) {
+                    $this->strictSourceVerdictCache[$sourceId] =
+                        $this->resolveRelationSourceEntry(
+                            $sourceId,
+                            $includeDrafts,
+                            $includeRevisions,
+                            $initiatingUserId,
+                        ) instanceof Entry;
                 }
 
-                if ($resolvedSourceCache[$sourceId] instanceof Entry) {
+                if ($this->strictSourceVerdictCache[$sourceId]) {
                     $usedAssetIds[$targetId] = true;
                 }
             }
@@ -411,8 +486,13 @@ class RelationUsageResolver extends Component
             ])
             ->all();
 
+        $this->ensureVerdictCacheSignature(
+            $includeDrafts,
+            $includeRevisions,
+            $initiatingUserId,
+        );
+
         $usedAssetIds = [];
-        $sourceUsageCache = [];
 
         foreach ($relations as $relation) {
             $sourceId = (int) ($relation["sourceId"] ?? 0);
@@ -422,8 +502,8 @@ class RelationUsageResolver extends Component
                 continue;
             }
 
-            if (!array_key_exists($sourceId, $sourceUsageCache)) {
-                $sourceUsageCache[$sourceId] = $this->sourceCountsForFallbackRelationUsage(
+            if (!array_key_exists($sourceId, $this->fallbackSourceVerdictCache)) {
+                $this->fallbackSourceVerdictCache[$sourceId] = $this->sourceCountsForFallbackRelationUsage(
                     $sourceId,
                     $includeDrafts,
                     $includeRevisions,
@@ -431,7 +511,7 @@ class RelationUsageResolver extends Component
                 );
             }
 
-            if ($sourceUsageCache[$sourceId]) {
+            if ($this->fallbackSourceVerdictCache[$sourceId]) {
                 $usedAssetIds[$targetId] = true;
             }
         }
@@ -604,9 +684,16 @@ class RelationUsageResolver extends Component
     /**
      * Find an entry by element ID regardless of whether draft and revision
      * usage is currently enabled.
+     *
+     * Results (including misses) are cached by element ID, so shared owners
+     * in nested-element chains are only queried once per cache lifetime.
      */
     private function findEntryByIdIgnoringUsagePolicy(int $sourceId): ?Entry
     {
+        if (array_key_exists($sourceId, $this->entryLookupCache)) {
+            return $this->entryLookupCache[$sourceId];
+        }
+
         $queryDefinitions = [
             [
                 "query" => $this->buildRelationSourceEntryQuery($sourceId),
@@ -626,14 +713,21 @@ class RelationUsageResolver extends Component
             ],
         ];
 
+        $result = null;
+
         foreach ($queryDefinitions as $definition) {
             $entry = $definition["query"]->one();
             if ($entry instanceof Entry) {
-                return $entry;
+                $result = $entry;
+                break;
             }
         }
 
-        return null;
+        if (count($this->entryLookupCache) < self::MAX_CACHED_ENTRIES) {
+            $this->entryLookupCache[$sourceId] = $result;
+        }
+
+        return $result;
     }
 
     /**

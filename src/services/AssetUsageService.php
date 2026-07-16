@@ -150,6 +150,18 @@ class AssetUsageService extends Component
     }
 
     /**
+     * Clear the relation resolver's resolution caches.
+     *
+     * Call once per queue execution so cached verdicts and entry lookups
+     * are reused across the execution's chunks but never leak stale data
+     * across scans in long-running queue workers.
+     */
+    public function resetRelationResolutionCaches(): void
+    {
+        $this->getRelationUsageResolver()->resetResolutionCaches();
+    }
+
+    /**
      * Get IDs of unused assets.
      *
      * @param array<int> $volumeIds
