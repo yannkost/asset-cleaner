@@ -101,4 +101,11 @@ return [
     'Include revisions in this scan' => '이 스캔에 리비전 포함',
     'When enabled, assets referenced only in revisions may be treated as used.' => '활성화하면 리비전에서만 참조되는 에셋도 사용 중으로 간주될 수 있습니다.',
     'When enabled, any row in Craft’s relations table will cause an asset to be treated as used, including references created by plugin-defined or unknown element types. Disable this for a stricter scan.' => '활성화하면 Craft의 relations 테이블에 있는 모든 행이 에셋을 사용 중으로 간주하게 되며, 플러그인으로 정의되었거나 알 수 없는 요소 타입이 만든 참조도 포함됩니다. 더 엄격한 스캔을 원하면 이 옵션을 끄세요.',
+
+    // Settings - Scan performance
+    'Scan performance' => '스캔 성능',
+    'Relation batch size' => '관계 배치 크기',
+    'Maximum number of assets loaded for relation scanning per queue execution. Lower this (e.g. to 500) on sites with heavy or deeply nested relations if scan jobs time out. You can also override this with `relationBatchSize` in `config/asset-cleaner.php` or the `ASSET_CLEANER_RELATION_BATCH_SIZE` environment variable.' => '큐 실행 1회당 관계 스캔을 위해 로드되는 자산의 최대 수입니다. 관계가 많거나 깊게 중첩된 사이트에서 스캔 작업이 시간 초과되면 이 값을 낮추세요(예: 500). `config/asset-cleaner.php`의 `relationBatchSize` 또는 환경 변수 `ASSET_CLEANER_RELATION_BATCH_SIZE`로도 재정의할 수 있습니다.',
+    'Relation time budget (seconds)' => '관계 시간 예산(초)',
+    'Wall-clock budget for the relation stage of a single queue execution. Once exceeded, the job stops and re-queues to continue, keeping each execution safely under the queue’s time-to-reserve (TTR, 300s by default). Keep this comfortably below your TTR. You can also override this with `relationTimeBudgetSeconds` in `config/asset-cleaner.php` or the `ASSET_CLEANER_RELATION_TIME_BUDGET` environment variable.' => '단일 큐 실행의 관계 단계에 대한 실제 시간 예산입니다. 초과하면 작업이 중지되고 계속하기 위해 다시 큐에 등록되어 각 실행이 큐의 time-to-reserve(TTR, 기본 300초) 아래로 안전하게 유지됩니다. 이 값은 TTR보다 충분히 낮게 유지하세요. `config/asset-cleaner.php`의 `relationTimeBudgetSeconds` 또는 환경 변수 `ASSET_CLEANER_RELATION_TIME_BUDGET`로도 재정의할 수 있습니다.',
 ];

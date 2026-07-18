@@ -145,7 +145,7 @@ class ContentUsageService extends Component
         $results = [];
         $searchPatterns = $this->buildAssetSearchPatterns($asset);
 
-        foreach (GlobalSet::find()->all() as $globalSet) {
+        foreach (GlobalSet::find()->site("*")->all() as $globalSet) {
             foreach ($this->getHtmlFieldsForElement($globalSet) as $field) {
                 try {
                     $fieldValue = $globalSet->getFieldValue($field->handle);
@@ -185,153 +185,27 @@ class ContentUsageService extends Component
             }
         }
 
-        return $results;
+        // With site('*') the same global set is visited once per site — keep
+        // one result row per set and field.
+        $unique = [];
+        foreach ($results as $result) {
+            $key = (string) ($result["handle"] ?? "") . "-" . (string) ($result["field"] ?? "");
+            $unique[$key] = $result;
+        }
+
+        return array_values($unique);
     }
 
-    /**
-     * Build a content index for efficient batch asset scanning.
-     *
-     * Only loads entries whose entry types have CKEditor/Redactor fields,
-     * skipping entire sections that don't have rich text.
-     *
-     * @return array{entries: array<int, string>, globals: array<string, string>}
-     */
-    public function buildContentIndex(): array
-    {
-        $htmlFields = $this->getAllHtmlFields();
-        if (empty($htmlFields)) {
-            return [
-                "entries" => [],
-                "globals" => [],
-            ];
-        }
+    
 
-        $htmlFieldIds = [];
-        foreach ($htmlFields as $field) {
-            $fieldId = (int) ($field->id ?? 0);
-            if ($fieldId > 0) {
-                $htmlFieldIds[] = $fieldId;
-            }
-        }
-
-        $relevantTypeIds = $this->getEntryTypeIdsWithFields($htmlFieldIds);
-
-        $volumeIndicators = $this->getVolumeIndicators();
-        $fallbackPatterns = [
-            ".jpg",
-            ".jpeg",
-            ".png",
-            ".gif",
-            ".svg",
-            ".pdf",
-            ".webp",
-            ".mp4",
-            ".mp3",
-            "data-asset-id",
-        ];
-
-        if (empty($relevantTypeIds)) {
-            return [
-                "entries" => [],
-                "globals" => $this->buildGlobalsIndex(),
-            ];
-        }
-
-        $entryIndex = [];
-        $entryQuery = Entry::find()->status(null)->typeId($relevantTypeIds);
-
-        $batchSize = 200;
-        foreach ($entryQuery->each($batchSize) as $entry) {
-            $content = $this->collectHtmlContentFromElement($entry);
-            if ($content === "") {
-                continue;
-            }
-
-            $hasAssetReference = false;
-            foreach ($volumeIndicators as $indicator) {
-                if ($indicator !== "" && str_contains($content, $indicator)) {
-                    $hasAssetReference = true;
-                    break;
-                }
-            }
-
-            if (!$hasAssetReference) {
-                foreach ($fallbackPatterns as $pattern) {
-                    if (str_contains($content, $pattern)) {
-                        $hasAssetReference = true;
-                        break;
-                    }
-                }
-            }
-
-            if ($hasAssetReference) {
-                $entryIndex[(int) $entry->id] = $content;
-            }
-        }
-
-        return [
-            "entries" => $entryIndex,
-            "globals" => $this->buildGlobalsIndex(),
-        ];
-    }
-
-    /**
-     * Check whether an asset is present in a pre-built content index.
-     */
-    public function isAssetUsedWithIndex(int $assetId, array $contentIndex): bool
-    {
-        $asset = Asset::find()->id($assetId)->one();
-        if (!$asset) {
-            return false;
-        }
-
-        $searchPatterns = $this->buildAssetSearchPatterns($asset);
-        $dataAssetPattern = 'data-asset-id="' . $assetId . '"';
-        $hashAssetPattern = "#asset:" . $assetId;
-
-        foreach ($contentIndex["entries"] ?? [] as $entryContent) {
-            if (!is_string($entryContent)) {
-                continue;
-            }
-
-            foreach ($searchPatterns as $pattern) {
-                if ($pattern !== "" && str_contains($entryContent, $pattern)) {
-                    return true;
-                }
-            }
-
-            if (
-                str_contains($entryContent, $dataAssetPattern) ||
-                str_contains($entryContent, $hashAssetPattern)
-            ) {
-                return true;
-            }
-        }
-
-        foreach ($contentIndex["globals"] ?? [] as $globalContent) {
-            if (!is_string($globalContent)) {
-                continue;
-            }
-
-            foreach ($searchPatterns as $pattern) {
-                if ($pattern !== "" && str_contains($globalContent, $pattern)) {
-                    return true;
-                }
-            }
-
-            if (
-                str_contains($globalContent, $dataAssetPattern) ||
-                str_contains($globalContent, $hashAssetPattern)
-            ) {
-                return true;
-            }
-        }
-
-        return false;
-    }
+    
 
     /**
      * Fetch all entries that should be scanned for content usage.
+     *
+     * Entries are fetched for every site (one instance per site, each with
+     * that site's field content) and provisional drafts are included for all
+     * users, not just the initiating one.
      *
      * @param array<int> $relevantTypeIds
      * @return array<int, Entry>
@@ -342,39 +216,39 @@ class ContentUsageService extends Component
         ?bool $includeRevisions = null,
         ?int $initiatingUserId = null,
     ): array {
-        $entries = Entry::find()->typeId($relevantTypeIds)->status(null)->all();
+        $entries = Entry::find()
+            ->typeId($relevantTypeIds)
+            ->site("*")
+            ->status(null)
+            ->all();
 
         $allEntries = [];
         foreach ($entries as $entry) {
-            $allEntries[(int) $entry->id] = $entry;
+            $allEntries[$this->entrySiteKey($entry)] = $entry;
         }
 
         if ($this->getEntryUsageResolver()->resolveIncludeDrafts($includeDrafts)) {
             foreach (
                 Entry::find()
                     ->typeId($relevantTypeIds)
+                    ->site("*")
                     ->drafts()
                     ->savedDraftsOnly()
                     ->all()
                 as $entry
             ) {
-                $allEntries[(int) $entry->id] = $entry;
+                $allEntries[$this->entrySiteKey($entry)] = $entry;
             }
 
-            $draftCreatorUserId = $this->getEntryUsageResolver()->resolveDraftCreatorUserId(
-                $initiatingUserId,
-            );
-
-            $provisionalDraftsQuery = Entry::find()
-                ->typeId($relevantTypeIds)
-                ->provisionalDrafts();
-
-            if ($draftCreatorUserId !== null) {
-                $provisionalDraftsQuery->draftCreator($draftCreatorUserId);
-            }
-
-            foreach ($provisionalDraftsQuery->all() as $entry) {
-                $allEntries[(int) $entry->id] = $entry;
+            foreach (
+                Entry::find()
+                    ->typeId($relevantTypeIds)
+                    ->site("*")
+                    ->provisionalDrafts()
+                    ->all()
+                as $entry
+            ) {
+                $allEntries[$this->entrySiteKey($entry)] = $entry;
             }
         }
 
@@ -386,15 +260,25 @@ class ContentUsageService extends Component
             foreach (
                 Entry::find()
                     ->typeId($relevantTypeIds)
+                    ->site("*")
                     ->revisions()
                     ->all()
                 as $entry
             ) {
-                $allEntries[(int) $entry->id] = $entry;
+                $allEntries[$this->entrySiteKey($entry)] = $entry;
             }
         }
 
         return array_values($allEntries);
+    }
+
+    /**
+     * Build a dedupe key that keeps one entry instance per entry AND site,
+     * since each site instance carries its own field content.
+     */
+    private function entrySiteKey(Entry $entry): string
+    {
+        return (int) ($entry->id ?? 0) . "-" . (int) ($entry->siteId ?? 0);
     }
 
     /**
@@ -470,56 +354,9 @@ class ContentUsageService extends Component
         return $typeIds;
     }
 
-    /**
-     * Build the globals content index.
-     *
-     * @return array<string, string>
-     */
-    private function buildGlobalsIndex(): array
-    {
-        $globalIndex = [];
+    
 
-        foreach (GlobalSet::find()->all() as $globalSet) {
-            $content = $this->collectHtmlContentFromElement($globalSet);
-            if ($content !== "") {
-                $globalIndex[(string) $globalSet->handle] = $content;
-            }
-        }
-
-        return $globalIndex;
-    }
-
-    /**
-     * Collect concatenated HTML-capable field content for an element.
-     */
-    private function collectHtmlContentFromElement(object $element): string
-    {
-        $content = "";
-
-        foreach ($this->getHtmlFieldsForElement($element) as $field) {
-            try {
-                $fieldValue = $element->getFieldValue($field->handle);
-            } catch (\Throwable $e) {
-                Logger::warning(
-                    "Skipping field while building content index because its value could not be read.",
-                    [
-                        "elementId" => (int) ($element->id ?? 0),
-                        "elementType" => get_class($element),
-                        "fieldHandle" => (string) ($field->handle ?? ""),
-                        "error" => $e->getMessage(),
-                    ],
-                );
-                continue;
-            }
-
-            $normalizedValue = $this->normalizeFieldValueToString($fieldValue);
-            if ($normalizedValue !== null && $normalizedValue !== "") {
-                $content .= $normalizedValue . "\n";
-            }
-        }
-
-        return $content;
-    }
+    
 
     /**
      * Get HTML-capable custom fields for the concrete element field layout.
@@ -707,67 +544,7 @@ class ContentUsageService extends Component
             str_contains($content, "#asset:" . $assetId);
     }
 
-    /**
-     * Collect volume-derived indicators that often appear in asset URLs/paths.
-     *
-     * @return array<int, string>
-     */
-    private function getVolumeIndicators(): array
-    {
-        $volumeIndicators = [];
-
-        foreach (Craft::$app->getVolumes()->getAllVolumes() as $volume) {
-            try {
-                $fs = $volume->getFs();
-
-                if (method_exists($fs, "getRootUrl")) {
-                    $rootUrl = $fs->getRootUrl();
-                    if (is_string($rootUrl) && $rootUrl !== "") {
-                        $parsed = parse_url($rootUrl);
-                        if (is_array($parsed) && isset($parsed["path"])) {
-                            $path = trim((string) $parsed["path"]);
-                            if ($path !== "") {
-                                $volumeIndicators[] = $path;
-                            }
-                        }
-
-                        $volumeIndicators[] = $rootUrl;
-                    }
-                }
-
-                if (method_exists($fs, "getRootPath")) {
-                    $rootPath = $fs->getRootPath();
-                    if (is_string($rootPath) && $rootPath !== "") {
-                        $basename = basename($rootPath);
-                        if ($basename !== "") {
-                            $volumeIndicators[] = $basename;
-                        }
-                    }
-                }
-            } catch (\Throwable $e) {
-                Logger::warning(
-                    "Skipping volume while building content index because its filesystem metadata could not be read.",
-                    [
-                        "volumeId" => (int) ($volume->id ?? 0),
-                        "volumeHandle" => (string) ($volume->handle ?? ""),
-                        "error" => $e->getMessage(),
-                    ],
-                );
-            }
-        }
-
-        return array_values(
-            array_unique(
-                array_filter(
-                    array_map(
-                        static fn(string $indicator): string => trim($indicator),
-                        $volumeIndicators,
-                    ),
-                    static fn(string $indicator): bool => $indicator !== "",
-                ),
-            ),
-        );
-    }
+    
 
     private function getEntryUsageResolver(): EntryUsageResolver
     {

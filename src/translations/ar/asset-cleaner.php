@@ -102,4 +102,11 @@ return [
     'Include revisions in this scan' => 'تضمين المراجعات في هذا الفحص',
     'When enabled, assets referenced only in revisions may be treated as used.' => 'عند التفعيل، قد تُعتبر الأصول المشار إليها فقط في المراجعات مستخدمة.',
     'When enabled, any row in Craft’s relations table will cause an asset to be treated as used, including references created by plugin-defined or unknown element types. Disable this for a stricter scan.' => 'عند التفعيل، سيؤدي أي صف في جدول العلاقات في Craft إلى اعتبار الأصل مستخدمًا، بما في ذلك المراجع التي تنشئها أنواع عناصر معرّفة عبر إضافات أو غير معروفة. عطّل هذا الخيار للحصول على فحص أكثر صرامة.',
+
+    // Settings - Scan performance
+    'Scan performance' => 'أداء الفحص',
+    'Relation batch size' => 'حجم دفعة العلاقات',
+    'Maximum number of assets loaded for relation scanning per queue execution. Lower this (e.g. to 500) on sites with heavy or deeply nested relations if scan jobs time out. You can also override this with `relationBatchSize` in `config/asset-cleaner.php` or the `ASSET_CLEANER_RELATION_BATCH_SIZE` environment variable.' => 'الحد الأقصى لعدد الأصول التي يتم تحميلها لفحص العلاقات في كل تنفيذ لقائمة الانتظار. قم بخفض هذه القيمة (مثلاً إلى 500) في المواقع ذات العلاقات الكثيرة أو المتداخلة بعمق إذا انتهت مهلة مهام الفحص. يمكنك أيضًا تجاوز هذه القيمة عبر `relationBatchSize` في `config/asset-cleaner.php` أو متغير البيئة `ASSET_CLEANER_RELATION_BATCH_SIZE`.',
+    'Relation time budget (seconds)' => 'الميزانية الزمنية للعلاقات (بالثواني)',
+    'Wall-clock budget for the relation stage of a single queue execution. Once exceeded, the job stops and re-queues to continue, keeping each execution safely under the queue’s time-to-reserve (TTR, 300s by default). Keep this comfortably below your TTR. You can also override this with `relationTimeBudgetSeconds` in `config/asset-cleaner.php` or the `ASSET_CLEANER_RELATION_TIME_BUDGET` environment variable.' => 'الميزانية الزمنية الفعلية لمرحلة العلاقات في تنفيذ واحد لقائمة الانتظار. عند تجاوزها تتوقف المهمة وتعيد إدراج نفسها في قائمة الانتظار للمتابعة، بحيث يبقى كل تنفيذ بأمان دون مهلة time-to-reserve الخاصة بقائمة الانتظار (TTR، وهي 300 ثانية افتراضيًا). أبقِ هذه القيمة أقل بوضوح من TTR لديك. يمكنك أيضًا تجاوز هذه القيمة عبر `relationTimeBudgetSeconds` في `config/asset-cleaner.php` أو متغير البيئة `ASSET_CLEANER_RELATION_TIME_BUDGET`.',
 ];

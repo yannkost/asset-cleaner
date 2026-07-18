@@ -26,9 +26,10 @@ class ScanRelationsJob extends BaseJob
     public int $processedAssets = 0;
 
     /**
-     * @var int Number of assets to process per queue execution
+     * @var int|null Maximum assets to load per queue execution. When null the
+     * configured relation batch size (setting/config/env) is used.
      */
-    public int $batchSize = 2000;
+    public ?int $batchSize = null;
 
     /**
      * @inheritdoc

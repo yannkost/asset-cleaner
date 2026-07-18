@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-07-18
+
+### Added
+- Added a **Relation batch size** setting so you can lower how many assets each relation scan queue execution loads on sites with heavy or deeply nested relations. Overridable via `relationBatchSize` in `config/asset-cleaner.php` or the `ASSET_CLEANER_RELATION_BATCH_SIZE` environment variable.
+- Added a **Relation time budget** setting that stops and re-queues a relation scan execution once a wall-clock budget is reached, keeping each execution under the queue's time-to-reserve (TTR). Overridable via `relationTimeBudgetSeconds` in `config/asset-cleaner.php` or the `ASSET_CLEANER_RELATION_TIME_BUDGET` environment variable.
+
+### Changed
+- Relation usage verdicts and entry lookups are now cached for the duration of a queue execution instead of a single chunk, so repeated relation sources and shared owners in nested-element chains (Matrix, CKEditor) are only resolved once. This significantly reduces database queries on relation-heavy sites.
+- Relation sources are now resolved in bulk: entry sources are classified, loaded, and policy-checked with a handful of set-based queries per batch instead of several queries per source, reducing scan queries by orders of magnitude on relation-heavy sites. Disable with `bulkRelationResolution => false` in `config/asset-cleaner.php` or `ASSET_CLEANER_BULK_RELATION_RESOLUTION=false` to fall back to per-source resolution. Verify parity on an install with `php craft asset-cleaner/diagnostics/relation-parity`.
+
+### Fixed
+- Time-bounded the relation scan stage so a single queue execution stops and re-queues before hitting the worker timeout, fixing `ScanRelationsJob` failures with "exceeded the timeout of 300 seconds" on large or heavily related asset libraries.
+- **Multi-site content is now fully scanned.** Content scanning (entries and global sets) previously only inspected the primary site's field content, so an asset referenced only in another site's CKEditor/Redactor content could be wrongly reported as unused. All content queries now cover every site.
+- **Provisional drafts now count as usage for every user.** When "include drafts" is enabled, scans previously only counted provisional drafts belonging to the user who started the scan, so assets referenced in other editors' work-in-progress could be wrongly reported as unused. The per-user filter has been removed from scans and the usage inspector.
+
+## [1.4.1] - 2026-06-08
+
+### Changed
+- Renamed the Composer package to `yannkost/craft-asset-cleaner`. No functional changes.
+
 ## [1.4.0] - 2026-04-16
 
 ### Added

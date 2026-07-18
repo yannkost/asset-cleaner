@@ -150,6 +150,18 @@ class AssetUsageService extends Component
     }
 
     /**
+     * Clear the relation resolver's resolution caches.
+     *
+     * Call once per queue execution so cached verdicts and entry lookups
+     * are reused across the execution's chunks but never leak stale data
+     * across scans in long-running queue workers.
+     */
+    public function resetRelationResolutionCaches(): void
+    {
+        $this->getRelationUsageResolver()->resetResolutionCaches();
+    }
+
+    /**
      * Get IDs of unused assets.
      *
      * @param array<int> $volumeIds
@@ -302,46 +314,9 @@ class AssetUsageService extends Component
         return $result;
     }
 
-    /**
-     * Build a content index for efficient batch asset scanning.
-     *
-     * @return array{entries: array<int, string>, globals: array<string, string>}
-     */
-    public function buildContentIndex(): array
-    {
-        return $this->getContentUsageService()->buildContentIndex();
-    }
+    
 
-    /**
-     * Check whether an asset is used with a pre-built content index.
-     *
-     * @param array{entries?: array<int, string>, globals?: array<string, string>} $contentIndex
-     */
-    public function isAssetUsedWithIndex(
-        int $assetId,
-        array $contentIndex,
-        ?bool $includeDrafts = null,
-        ?bool $includeRevisions = null,
-        ?int $initiatingUserId = null,
-        ?bool $countAllRelationsAsUsage = true,
-    ): bool {
-        if (
-            $this->getRelationUsageResolver()->hasResolvedRelationUsage(
-                $assetId,
-                $includeDrafts,
-                $includeRevisions,
-                $initiatingUserId,
-                $countAllRelationsAsUsage,
-            )
-        ) {
-            return true;
-        }
-
-        return $this->getContentUsageService()->isAssetUsedWithIndex(
-            $assetId,
-            $contentIndex,
-        );
-    }
+    
 
     private function getEntryUsageResolver(): EntryUsageResolver
     {
@@ -352,7 +327,7 @@ class AssetUsageService extends Component
         return $this->entryUsageResolver;
     }
 
-    private function getRelationUsageResolver(): RelationUsageResolver
+    public function getRelationUsageResolver(): RelationUsageResolver
     {
         if ($this->relationUsageResolver === null) {
             $this->relationUsageResolver = new RelationUsageResolver(

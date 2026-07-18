@@ -42,6 +42,13 @@ class ScanService extends Component
     private const DEFAULT_RELATION_BATCH_SIZE = 2000;
 
     /**
+     * Wall-clock budget, in seconds, for the relation stage of a single queue
+     * execution. Once exceeded the batch stops and re-queues so a slow relation
+     * graph never pushes a single execution past the worker timeout (TTR).
+     */
+    private const DEFAULT_RELATION_TIME_BUDGET = 120;
+
+    /**
      * @var array<string, ScanStoreInterface>
      */
     private array $stores = [];
@@ -140,6 +147,105 @@ class ScanService extends Component
         return $settings instanceof Settings
             ? $settings->shouldIncludeRevisionsByDefault()
             : false;
+    }
+
+    /**
+     * Resolve the maximum number of assets loaded for relation scanning per
+     * queue execution.
+     *
+     * Config (config/asset-cleaner.php => relationBatchSize, or the
+     * ASSET_CLEANER_RELATION_BATCH_SIZE env var) overrides the plugin setting.
+     *
+     * @return int
+     */
+    public function getRelationBatchSize(): int
+    {
+        $configuredValue = $this->getConfiguredPositiveInt(
+            "relationBatchSize",
+            "ASSET_CLEANER_RELATION_BATCH_SIZE",
+        );
+        if ($configuredValue !== null) {
+            return $configuredValue;
+        }
+
+        $settings = Plugin::getInstance()->getSettings();
+
+        return $settings instanceof Settings
+            ? $settings->getRelationBatchSize()
+            : self::DEFAULT_RELATION_BATCH_SIZE;
+    }
+
+    /**
+     * Resolve the wall-clock budget, in seconds, for the relation stage of a
+     * single queue execution.
+     *
+     * Config (config/asset-cleaner.php => relationTimeBudgetSeconds, or the
+     * ASSET_CLEANER_RELATION_TIME_BUDGET env var) overrides the plugin setting.
+     *
+     * @return int
+     */
+    public function getRelationTimeBudget(): int
+    {
+        $configuredValue = $this->getConfiguredPositiveInt(
+            "relationTimeBudgetSeconds",
+            "ASSET_CLEANER_RELATION_TIME_BUDGET",
+        );
+        if ($configuredValue !== null) {
+            return $configuredValue;
+        }
+
+        $settings = Plugin::getInstance()->getSettings();
+
+        return $settings instanceof Settings
+            ? $settings->getRelationTimeBudgetSeconds()
+            : self::DEFAULT_RELATION_TIME_BUDGET;
+    }
+
+    /**
+     * Resolve a positive-integer override from config or environment.
+     *
+     * @param string $configKey Key in config/asset-cleaner.php
+     * @param string $envVar Environment variable name
+     * @return int|null Null when unset or not a positive integer
+     */
+    private function getConfiguredPositiveInt(
+        string $configKey,
+        string $envVar,
+    ): ?int {
+        $rawValue = null;
+
+        try {
+            $config = Craft::$app
+                ->getConfig()
+                ->getConfigFromFile("asset-cleaner");
+            if (is_array($config) && array_key_exists($configKey, $config)) {
+                $rawValue = Craft::parseEnv((string) $config[$configKey]);
+            }
+        } catch (\Throwable $e) {
+            Logger::warning(
+                "Could not load Asset Cleaner config while resolving an integer setting.",
+                [
+                    "configKey" => $configKey,
+                    "error" => $e->getMessage(),
+                ],
+            );
+        }
+
+        $envValue = getenv($envVar);
+        if (is_string($envValue) && trim($envValue) !== "") {
+            $rawValue = trim($envValue);
+        }
+
+        if ($rawValue === null) {
+            return null;
+        }
+
+        $intValue = filter_var($rawValue, FILTER_VALIDATE_INT);
+        if ($intValue === false || $intValue < 1) {
+            return null;
+        }
+
+        return $intValue;
     }
 
     /**
@@ -728,7 +834,10 @@ class ScanService extends Component
             return count($usedIds);
         }
 
-        foreach (GlobalSet::find()->all() as $globalSet) {
+        // site('*') so every site's global content is inspected — global set
+        // fields are translatable and an asset may only be referenced in a
+        // non-primary site's content.
+        foreach (GlobalSet::find()->site("*")->all() as $globalSet) {
             /** @var GlobalSet $globalSet */
             foreach ($this->getHtmlFieldsForElement($globalSet) as $field) {
 
@@ -1795,8 +1904,14 @@ class ScanService extends Component
         );
         $relationBatchSize = max(
             $chunkSize,
-            (int) ($batchSize ?? self::DEFAULT_RELATION_BATCH_SIZE),
+            (int) ($batchSize ?? $this->getRelationBatchSize()),
         );
+        $relationTimeBudget = max(1, $this->getRelationTimeBudget());
+
+        // Fresh caches per queue execution: resolved source verdicts and
+        // entry lookups are shared across all sub-chunks below, but never
+        // survive into the next job of a long-running queue worker.
+        Plugin::getInstance()->assetUsage->resetRelationResolutionCaches();
         $totalAssets = max(0, (int) ($meta["totalAssets"] ?? 0));
         $batchOffset = max(0, min($processedAssets, $totalAssets));
         $expectedRelationOffset = max(0, (int) ($meta["relationOffset"] ?? 0));
@@ -1908,25 +2023,45 @@ class ScanService extends Component
             ];
         }
 
+        // Process the window in sub-chunks and stop once the wall-clock budget
+        // for this execution is spent, so a heavy relation graph re-queues to
+        // continue instead of exceeding the worker timeout (TTR). At least one
+        // sub-chunk always runs, guaranteeing forward progress.
         $usedIds = [];
-        $this->collectRelationChunk(
-            $assetIds,
-            $usedIds,
-            $includeDrafts,
-            $includeRevisions,
-            $countAllRelationsAsUsage,
-            $initiatingUserId,
-        );
+        $processedInRun = 0;
+        $startedAt = microtime(true);
+
+        foreach (array_chunk($assetIds, $chunkSize) as $assetChunk) {
+            $this->collectRelationChunk(
+                $assetChunk,
+                $usedIds,
+                $includeDrafts,
+                $includeRevisions,
+                $countAllRelationsAsUsage,
+                $initiatingUserId,
+            );
+            $processedInRun += count($assetChunk);
+
+            if (
+                $processedInRun < count($assetIds) &&
+                microtime(true) - $startedAt >= $relationTimeBudget
+            ) {
+                break;
+            }
+        }
 
         $processedAssets = min(
             $totalAssets,
-            $batchOffset + count($assetIds),
+            $batchOffset + $processedInRun,
         );
 
-        $batchNumber = (int) floor($batchOffset / $relationBatchSize);
+        // Key used IDs by the segment offset so variable-length, time-bounded
+        // segments never collide, and a re-run of the same offset replaces its
+        // own rows idempotently. getMergedUsedIds() unions all "relations-*"
+        // segments for the scan.
         $store->replaceUsedIds(
             $scanId,
-            sprintf("relations-%06d", $batchNumber + 1),
+            sprintf("relations-%012d", $batchOffset),
             array_map("intval", array_keys($usedIds)),
         );
 
@@ -2095,9 +2230,10 @@ class ScanService extends Component
     /**
      * Iterate entries that should participate in content scanning in batches.
      *
-     * When draft usage is enabled, this includes canonical entries, saved drafts,
-     * and provisional drafts created by the user who started the scan. When
-     * revision usage is enabled, this also includes revisions.
+     * When draft usage is enabled, this includes canonical entries, saved
+     * drafts, and all users' provisional drafts. When revision usage is
+     * enabled, this also includes revisions. Every entry is yielded once per
+     * site so per-site field content is inspected.
      *
      * @param array<int> $relevantTypeIds
      * @param int $batchSize
@@ -2136,11 +2272,19 @@ class ScanService extends Component
                     }
 
                     $entryId = (int) ($entry->id ?? 0);
-                    if ($entryId <= 0 || isset($seenEntryIds[$entryId])) {
+                    if ($entryId <= 0) {
                         continue;
                     }
 
-                    $seenEntryIds[$entryId] = true;
+                    // Key by entry AND site: with site('*') queries the same
+                    // entry ID appears once per site, each carrying that
+                    // site's field content, and every one must be scanned.
+                    $seenKey = $entryId . "-" . (int) ($entry->siteId ?? 0);
+                    if (isset($seenEntryIds[$seenKey])) {
+                        continue;
+                    }
+
+                    $seenEntryIds[$seenKey] = true;
                     yield $entry;
                 }
             }
@@ -2149,6 +2293,10 @@ class ScanService extends Component
 
     /**
      * Build the element queries used for batched content scanning.
+     *
+     * Queries cover every site so per-site field content is always inspected,
+     * and provisional drafts are included for all users — an asset referenced
+     * in anyone's work-in-progress must never be reported as unused.
      *
      * @param array<int> $relevantTypeIds
      * @param bool $includeDrafts
@@ -2169,6 +2317,7 @@ class ScanService extends Component
         $queries = [
             Entry::find()
                 ->typeId($relevantTypeIds)
+                ->site("*")
                 ->status(null)
                 ->orderBy(["elements.id" => SORT_ASC]),
         ];
@@ -2176,22 +2325,22 @@ class ScanService extends Component
         if ($includeDrafts) {
             $queries[] = Entry::find()
                 ->typeId($relevantTypeIds)
+                ->site("*")
                 ->drafts()
                 ->savedDraftsOnly()
                 ->orderBy(["elements.id" => SORT_ASC]);
 
-            if ($initiatingUserId !== null && $initiatingUserId > 0) {
-                $queries[] = Entry::find()
-                    ->typeId($relevantTypeIds)
-                    ->provisionalDrafts()
-                    ->draftCreator($initiatingUserId)
-                    ->orderBy(["elements.id" => SORT_ASC]);
-            }
+            $queries[] = Entry::find()
+                ->typeId($relevantTypeIds)
+                ->site("*")
+                ->provisionalDrafts()
+                ->orderBy(["elements.id" => SORT_ASC]);
         }
 
         if ($includeRevisions) {
             $queries[] = Entry::find()
                 ->typeId($relevantTypeIds)
+                ->site("*")
                 ->revisions()
                 ->orderBy(["elements.id" => SORT_ASC]);
         }
