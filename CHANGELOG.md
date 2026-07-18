@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Completed control panel translations in all supported languages: the settings page, queue job descriptions, scan progress stage labels, usage modal labels, and bulk delete confirmations were previously untranslated in some or all locales
+
 ## [1.5.0] - 2026-07-18
 
 ### Added
