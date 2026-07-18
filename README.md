@@ -134,6 +134,9 @@ php craft asset-cleaner/scan/delete --force
 
 # Dry run (preview only)
 php craft asset-cleaner/scan/delete --dry-run
+
+# Diagnostics: verify bulk relation resolution matches the per-source path
+php craft asset-cleaner/diagnostics/relation-parity
 ```
 
 ## How It Works
@@ -243,6 +246,41 @@ Scans also provide a **Count all relational references as usage** checkbox.
 When this option is enabled, any asset with a row in Craft’s `relations` table is treated as used. This is the safest mode for projects that rely on plugin-defined or unknown element types that may store asset relations outside normal entry content.
 
 When this option is disabled, Asset Cleaner uses stricter relation resolution rules to identify more potentially unused assets, but that can undercount legitimate backend-only usage from third-party element types.
+
+### Scan performance tuning
+
+The relation stage of a scan runs in resumable queue batches, and two settings control its footprint. Both are available in the plugin settings, and can be overridden via config or environment variables:
+
+- **Relation batch size** (`relationBatchSize` in `config/asset-cleaner.php`, or the `ASSET_CLEANER_RELATION_BATCH_SIZE` environment variable, default `2000`) - the maximum number of assets loaded for relation scanning per queue execution. Lower this (e.g. to `500`) on sites with heavy or deeply nested relations if scan jobs time out.
+- **Relation time budget** (`relationTimeBudgetSeconds` in `config/asset-cleaner.php`, or the `ASSET_CLEANER_RELATION_TIME_BUDGET` environment variable, default `120` seconds) - a wall-clock budget for the relation stage of a single queue execution. Once exceeded, the job stops and re-queues itself to continue, keeping each execution safely under the queue's time-to-reserve (TTR, 300 seconds by default). Keep this comfortably below your TTR.
+
+Note that the effective relation batch size is `max(assetChunkSize, relationBatchSize)` - the scan never loads fewer assets per relation batch than its asset chunk size, so very low `relationBatchSize` values are clamped up to the chunk size.
+
+Example config:
+
+```php
+<?php
+
+return [
+    'relationBatchSize' => 500,
+    'relationTimeBudgetSeconds' => 60,
+];
+```
+
+#### Bulk relation resolution
+
+Relation sources are resolved in bulk with set-based queries, which reduces scan queries by orders of magnitude on relation-heavy sites. If you suspect it misbehaves on your install, you can fall back to the original per-source resolution path with:
+
+- `'bulkRelationResolution' => false` in `config/asset-cleaner.php`, or
+- the `ASSET_CLEANER_BULK_RELATION_RESOLUTION=false` environment variable
+
+You can verify on your own install that both paths reach identical verdicts with:
+
+```bash
+php craft asset-cleaner/diagnostics/relation-parity
+```
+
+The command compares bulk and per-source verdicts over sampled assets in both relation-counting modes and reports any mismatch.
 
 ### Memory-efficient ZIP creation
 
