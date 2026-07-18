@@ -1,0 +1,6 @@
+# Local e2e test suite (depends on the local plugins-tester instance; see PLAN-E2E-TEST-SUITE.md)
+/tests/
+
+# OS / editor noise
+*:Zone.Identifier
+.DS_Store
