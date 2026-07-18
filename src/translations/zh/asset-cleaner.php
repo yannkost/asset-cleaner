@@ -102,4 +102,11 @@ return [
     'Include revisions in this scan' => '在此次扫描中包含修订',
     'When enabled, assets referenced only in revisions may be treated as used.' => '启用后，仅在修订中被引用的资源也可能被视为已使用。',
     'When enabled, any row in Craft’s relations table will cause an asset to be treated as used, including references created by plugin-defined or unknown element types. Disable this for a stricter scan.' => '启用后，Craft 关系表中的任何一行都会使资源被视为已使用，包括由插件定义或未知元素类型创建的引用。若要进行更严格的扫描，请禁用此选项。',
+
+    // Settings - Scan performance
+    'Scan performance' => '扫描性能',
+    'Relation batch size' => '关系批处理大小',
+    'Maximum number of assets loaded for relation scanning per queue execution. Lower this (e.g. to 500) on sites with heavy or deeply nested relations if scan jobs time out. You can also override this with `relationBatchSize` in `config/asset-cleaner.php` or the `ASSET_CLEANER_RELATION_BATCH_SIZE` environment variable.' => '每次队列执行为关系扫描加载的资源最大数量。如果扫描任务超时,请在关系繁多或深度嵌套的站点上调低此值(例如 500)。也可以通过 `config/asset-cleaner.php` 中的 `relationBatchSize` 或环境变量 `ASSET_CLEANER_RELATION_BATCH_SIZE` 覆盖此值。',
+    'Relation time budget (seconds)' => '关系时间预算(秒)',
+    'Wall-clock budget for the relation stage of a single queue execution. Once exceeded, the job stops and re-queues to continue, keeping each execution safely under the queue’s time-to-reserve (TTR, 300s by default). Keep this comfortably below your TTR. You can also override this with `relationTimeBudgetSeconds` in `config/asset-cleaner.php` or the `ASSET_CLEANER_RELATION_TIME_BUDGET` environment variable.' => '单次队列执行中关系阶段的实际时间预算。超出后,任务会停止并重新入队以继续执行,使每次执行都安全地低于队列的 time-to-reserve(TTR,默认 300 秒)。请将此值保持在明显低于您的 TTR 的水平。也可以通过 `config/asset-cleaner.php` 中的 `relationTimeBudgetSeconds` 或环境变量 `ASSET_CLEANER_RELATION_TIME_BUDGET` 覆盖此值。',
 ];
