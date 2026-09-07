@@ -4,3 +4,6 @@
 # OS / editor noise
 *:Zone.Identifier
 .DS_Store
+
+# Local Serena configuration
+.serena/
