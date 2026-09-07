@@ -37,7 +37,7 @@ class Plugin extends BasePlugin
     /**
      * @var string
      */
-    public string $schemaVersion = "1.1.3";
+    public string $schemaVersion = "1.1.4";
 
     /**
      * @var bool
