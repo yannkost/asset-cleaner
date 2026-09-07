@@ -305,4 +305,8 @@ The Craft License. See [LICENSE.md](LICENSE.md) for details.
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for release notes.
+### 1.5.1
+
+Fixed database scan storage setup for fresh installations and upgrades. New installations now create all scan storage tables, and an upgrade migration repairs missing tables while preserving existing tables and scan data. Apply Craft's pending migrations after updating.
+
+See [RELEASE-NOTES-1.5.1.md](RELEASE-NOTES-1.5.1.md) for this release and [CHANGELOG.md](CHANGELOG.md) for the full release history.
